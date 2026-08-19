@@ -101,8 +101,8 @@ outputs/<입력_이름>/
 ├── annotations_ytvis.json
 ├── interactive_session_meta.json
 ├── lineage_relations.json
-├── transparent_crops/             # t를 눌렀을 때
-└── outlines/                      # o를 눌렀을 때
+├── transparent_crops/<영상_이름>/  # t를 눌렀을 때
+└── outline_only/<영상_이름>/        # o를 눌렀을 때
 ```
 
 - `annotations_ytvis.json`: track ID별 COCO-style uncompressed RLE mask, bbox, area
