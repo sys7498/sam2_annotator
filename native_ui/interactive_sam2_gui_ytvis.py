@@ -543,17 +543,23 @@ class InteractiveSam2Gui:
         self.track_kind_by_id: Dict[int, str] = {}
         self.drag_prompt_kind = "object"
 
+        # All interaction sizes are specified in *display* units rather than
+        # source-frame pixels.  The source frame can be 720p or 4K, while the
+        # OpenCV window remains comfortably usable at ``window_width``.
+        self.window_width = int(max(320, args.window_width))
+        self.source_px_per_display_px = float(self.frame_w) / float(self.window_width)
+
         self.prompt_states: Dict[int, PromptState] = {}
         self.edit_mode = False
         self.edit_mask: Optional[np.ndarray] = None
-        self.brush_radius = int(max(1, args.brush_radius))
+        self.brush_radius = self._display_distance(float(max(1, args.brush_radius)))
         self.paint_mode = 0
         self.mouse_x = 0
         self.mouse_y = 0
         self.dragging_box = False
         self.drag_start: Optional[Tuple[int, int]] = None
         self.drag_current: Optional[Tuple[int, int]] = None
-        self.box_drag_min_size = 5
+        self.box_drag_min_size = self._display_distance(7.0)
 
         # Interactive labeling is step-driven: advance only when user presses a key.
         self.playing = False
@@ -562,8 +568,6 @@ class InteractiveSam2Gui:
         self.last_tick = time.time()
         self.state_window = int(max(0, args.state_window))
         self.gc_every = int(max(0, args.gc_every))
-        self.window_width = int(max(320, args.window_width))
-
         self.track_store = YTVISTrackStore(num_frames=0, category_id=int(args.category_id))
         self.track_store.update_frame(
             self.frame_idx,
@@ -579,7 +583,7 @@ class InteractiveSam2Gui:
         self.outline_only_dir = os.path.join(self.output_dir, "outline_only", self.video_name)
         self.outline_button_rect: Optional[Tuple[int, int, int, int]] = None
         # Keep contour thick enough for clear visibility when saving.
-        self.outline_thickness = int(max(3, round(min(self.frame_h, self.frame_w) / 520.0)))
+        self.outline_thickness = int(max(self._display_distance(3.0), round(min(self.frame_h, self.frame_w) / 520.0)))
         self.existing_track_count = self._count_existing_tracks(self.ytvis_out_path)
         if self.existing_track_count > 0:
             print(
@@ -617,6 +621,14 @@ class InteractiveSam2Gui:
             cv2.resizeWindow(self.window_name, target_w, target_h)
         except Exception:
             pass
+
+    def _display_distance(self, logical_pixels: float, *, minimum: int = 1) -> int:
+        """Convert a visual distance in the OpenCV window to source pixels."""
+        return int(max(minimum, round(float(logical_pixels) * self.source_px_per_display_px)))
+
+    def _display_font_scale(self, logical_scale: float) -> float:
+        """Keep OpenCV text the same physical size across input resolutions."""
+        return max(0.18, float(logical_scale) * self.source_px_per_display_px)
 
     def run(self) -> None:
         keep_ratio_flag = int(getattr(cv2, "WINDOW_KEEPRATIO", 0))
@@ -1579,10 +1591,10 @@ class InteractiveSam2Gui:
                 self._start_edit_mode()
             return False
         if key in (ord("+"), ord("=")):
-            self.brush_radius = min(200, self.brush_radius + 1)
+            self.brush_radius = min(self._display_distance(200.0), self.brush_radius + self._display_distance(2.0))
             return False
         if key in (ord("-"), ord("_")):
-            self.brush_radius = max(1, self.brush_radius - 1)
+            self.brush_radius = max(self._display_distance(1.0), self.brush_radius - self._display_distance(2.0))
             return False
 
         # quick save
@@ -1618,9 +1630,9 @@ class InteractiveSam2Gui:
 
     def _draw_outline_save_button(self, out: np.ndarray) -> None:
         _, w = out.shape[:2]
-        pad = 10
-        btn_h = 34
-        btn_w = 218
+        pad = self._display_distance(12.0)
+        btn_h = self._display_distance(44.0)
+        btn_w = self._display_distance(270.0)
         x2 = int(max(pad + 1, w - pad))
         x1 = int(max(pad, x2 - btn_w))
         y1 = int(pad)
@@ -1628,17 +1640,18 @@ class InteractiveSam2Gui:
         self.outline_button_rect = (x1, y1, x2, y2)
 
         cv2.rectangle(out, (x1, y1), (x2, y2), (28, 68, 28), -1)
-        cv2.rectangle(out, (x1, y1), (x2, y2), (220, 255, 220), 2)
+        cv2.rectangle(out, (x1, y1), (x2, y2), (220, 255, 220), self._display_distance(2.0))
         label = "Save Outline (o)"
-        cv2.putText(out, label, (x1 + 10, y1 + 23), cv2.FONT_HERSHEY_SIMPLEX, 0.58, (0, 0, 0), 3, cv2.LINE_AA)
+        label_origin = (x1 + self._display_distance(12.0), y1 + self._display_distance(29.0))
+        label_scale = self._display_font_scale(0.72)
         cv2.putText(
             out,
             label,
-            (x1 + 10, y1 + 23),
+            label_origin,
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.58,
+            label_scale,
             (235, 255, 235),
-            1,
+            self._display_distance(2.0),
             cv2.LINE_AA,
         )
 
@@ -1657,69 +1670,81 @@ class InteractiveSam2Gui:
             overlay[mask] = color
             out = cv2.addWeighted(overlay, alpha, out, 1.0 - alpha, 0.0)
             contours, _ = cv2.findContours(mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            cv2.drawContours(out, contours, -1, color, 2)
+            cv2.drawContours(out, contours, -1, color, self._display_distance(2.0))
             cx, cy = _mask_center(mask)
             kind = self._kind_for_track(int(oid))
             txt = f"id:{oid}({kind[0]})"
             if oid == self.active_obj_id:
                 txt += " *"
-            cv2.putText(out, txt, (cx, cy), cv2.FONT_HERSHEY_SIMPLEX, 0.55, color, 2, cv2.LINE_AA)
+            cv2.putText(
+                out,
+                txt,
+                (cx, cy),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                self._display_font_scale(0.76),
+                color,
+                self._display_distance(2.0),
+                cv2.LINE_AA,
+            )
 
         if self.edit_mode and self.edit_mask is not None and self.active_obj_id is not None:
             color = (0, 255, 255)
             overlay = out.copy()
             overlay[self.edit_mask.astype(bool)] = color
             out = cv2.addWeighted(overlay, 0.35, out, 0.65, 0.0)
-            cv2.circle(out, (self.mouse_x, self.mouse_y), self.brush_radius, color, 1)
+            cv2.circle(out, (self.mouse_x, self.mouse_y), self.brush_radius, color, self._display_distance(1.0))
         elif self.dragging_box and self.drag_start is not None and self.drag_current is not None:
             sx, sy = self.drag_start
             cx, cy = self.drag_current
             x1, x2 = min(int(sx), int(cx)), max(int(sx), int(cx))
             y1, y2 = min(int(sy), int(cy)), max(int(sy), int(cy))
-            cv2.rectangle(out, (x1, y1), (x2, y2), (0, 255, 255), 2)
+            cv2.rectangle(out, (x1, y1), (x2, y2), (0, 255, 255), self._display_distance(2.0))
             cv2.putText(
                 out,
                 "BOX",
                 (x1, max(16, y1 - 6)),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.5,
+                self._display_font_scale(0.7),
                 (0, 255, 255),
-                2,
+                self._display_distance(2.0),
                 cv2.LINE_AA,
             )
 
         # draw click prompts
         for oid, ps in self.prompt_states.items():
             for (x, y) in ps.pos_points:
-                cv2.circle(out, (int(x), int(y)), 4, (0, 255, 0), -1)
+                cv2.circle(out, (int(x), int(y)), self._display_distance(6.0), (0, 255, 0), -1)
             for (x, y) in ps.neg_points:
-                cv2.circle(out, (int(x), int(y)), 4, (0, 0, 255), -1)
-                cv2.line(out, (int(x) - 4, int(y) - 4), (int(x) + 4, int(y) + 4), (0, 0, 255), 1)
-                cv2.line(out, (int(x) - 4, int(y) + 4), (int(x) + 4, int(y) - 4), (0, 0, 255), 1)
+                radius = self._display_distance(6.0)
+                cv2.circle(out, (int(x), int(y)), radius, (0, 0, 255), -1)
+                cv2.line(out, (int(x) - radius, int(y) - radius), (int(x) + radius, int(y) + radius), (0, 0, 255), self._display_distance(1.0))
+                cv2.line(out, (int(x) - radius, int(y) + radius), (int(x) + radius, int(y) - radius), (0, 0, 255), self._display_distance(1.0))
 
         if self.total_frames is None:
             frame_text = f"{self.frame_idx + 1}/?"
         else:
             frame_text = f"{self.frame_idx + 1}/{self.total_frames}"
         lines = [
-            f"frame: {frame_text}  mode: {'EDIT' if self.edit_mode else 'CLICK'}  MANUAL",
+            f"Frame {frame_text} | {'EDIT' if self.edit_mode else 'CLICK'} | active ID: {self.active_obj_id if self.active_obj_id is not None else '-'}",
             (
-                f"active: {self.active_obj_id if self.active_obj_id is not None else '-'}  "
-                f"obj_active: {self.active_id_by_kind.get('object')} hand_active: {self.active_id_by_kind.get('hand')}  "
-                f"next_obj: {self.next_obj_id} next_hand: {self.next_hand_id}"
+                f"Object: {self.active_id_by_kind.get('object')} | Hand: {self.active_id_by_kind.get('hand')} | "
+                f"next object: {self.next_obj_id} | next hand: {self.next_hand_id}"
             ),
-            f"state_window: {self.state_window}  gc_every: {self.gc_every}",
-            "mouse: Shift+L click/drag=HAND prompt, L click/drag=OBJECT prompt, Shift+R=HAND negative, R=OBJECT negative",
-            "keys: space/. (next), [ ](id cycle), g(goto id), v(status), n(new OBJECT id), Shift+N or h(new HAND id), d(delete ids), c(rename ids), x(clear clicks)",
-            "keys: p(prompt editor: + x y / - x y / pop / clear),",
-            "keys: e(edit), a(apply edit), z(reset edit), +/- brush, s(save), t(save transparent PNG), o(save outline), q/esc(quit)",
-            "button: top-right Save Outline",
+            "Mouse: left click/drag object | Shift + left click/drag hand | right click negative",
+            "Keys: Space next | n object | h hand | [ ] ID | d delete | e edit | s save | q exit",
+            "More: g select | c rename | p prompts | x clear | +/- brush | t crop | o outline",
         ]
-        y0 = 24
+        y0 = self._display_distance(30.0)
+        line_height = self._display_distance(30.0)
+        panel_height = y0 + len(lines) * line_height + self._display_distance(10.0)
+        hud_overlay = out.copy()
+        cv2.rectangle(hud_overlay, (0, 0), (out.shape[1], panel_height), (12, 16, 20), -1)
+        out = cv2.addWeighted(hud_overlay, 0.76, out, 0.24, 0.0)
         for i, line in enumerate(lines):
-            y = y0 + i * 22
-            cv2.putText(out, line, (8, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (20, 20, 20), 3, cv2.LINE_AA)
-            cv2.putText(out, line, (8, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (255, 255, 255), 1, cv2.LINE_AA)
+            y = y0 + i * line_height
+            origin = (self._display_distance(12.0), y)
+            font_scale = self._display_font_scale(0.64)
+            cv2.putText(out, line, origin, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), self._display_distance(2.0), cv2.LINE_AA)
 
         self._draw_outline_save_button(out)
         return out
