@@ -128,6 +128,10 @@ audio는 추출하지 않는다. 중단된 작업은 완성된 `rgb/` 폴더를 
 `l`로 현재 relation을 터미널에서 확인한다. 가림이나 tracking 실패에는 `d`를 누르지 않으면
 relation이 생성되지 않는다.
 
+`s`를 누르거나 창을 닫아 최종 저장하면 `lineage_graph.png`도 자동 생성/갱신된다. 이 파일은
+각 object ID의 mask가 존재하는 프레임 구간과 구조 변화 화살표를 한 장에 그린 검수용 타임라인이다.
+초록은 자동 relation, 빨강은 `needs_review`, 주황 `?`는 successor가 아직 없는 종료 ID를 뜻한다.
+
 ## 6. 저장 결과
 
 각 입력은 다음 경로에 저장된다.
@@ -137,6 +141,7 @@ outputs/<입력_이름>/
 ├── annotations_ytvis.json
 ├── interactive_session_meta.json
 ├── lineage_relations.json
+├── lineage_graph.png
 ├── transparent_crops/<영상_이름>/  # t를 눌렀을 때
 └── outline_only/<영상_이름>/        # o를 눌렀을 때
 ```
@@ -144,6 +149,7 @@ outputs/<입력_이름>/
 - `annotations_ytvis.json`: track ID별 COCO-style uncompressed RLE mask, bbox, area
 - `interactive_session_meta.json`: 처리한 프레임, 영상 입력과 결과 파일 위치
 - `lineage_relations.json`: 자동 생성된 separation/joining predecessor–successor 관계 및 검수 상태
+- `lineage_graph.png`: ID별 mask 타임라인과 relation 화살표를 담은 빠른 검수용 그래프
 
 ## 7. WSL 문제 해결
 

@@ -16,6 +16,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable, List
 
+import cv2
+import numpy as np
+
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 NATIVE_UI_ROOT = PROJECT_ROOT / "native_ui"
@@ -187,6 +190,127 @@ class _LineageRecorder:
         }
 
 
+def _track_color(track_id: int) -> tuple[int, int, int]:
+    hue = int((int(track_id) * 37) % 180)
+    hsv = np.uint8([[[hue, 210, 255]]])
+    bgr = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)[0, 0]
+    return int(bgr[0]), int(bgr[1]), int(bgr[2])
+
+
+def _render_lineage_graph(
+    output_path: Path,
+    *,
+    track_store: Any,
+    relations: List[dict[str, Any]],
+    pending: List[_PendingPredecessor],
+    object_category_id: int,
+    processed_frames: int,
+) -> None:
+    """Render an inspectable object-ID timeline and structural-event graph."""
+    tracks = getattr(track_store, "tracks", {})
+    spans: dict[int, List[int]] = {}
+    for track_id, track in tracks.items():
+        if not isinstance(track, dict) or int(track.get("category_id", object_category_id)) != object_category_id:
+            continue
+        frame_map = track.get("frames", {})
+        if not isinstance(frame_map, dict):
+            continue
+        indices = sorted(int(frame_idx) for frame_idx in frame_map.keys())
+        if indices:
+            spans[int(track_id)] = indices
+
+    related_ids = {
+        int(track_id)
+        for relation in relations
+        for track_id in list(relation.get("predecessor_ids", [])) + list(relation.get("successor_ids", []))
+    }
+    related_ids.update(int(item.track_id) for item in pending)
+    track_ids = sorted(set(spans) | related_ids)
+    max_frame = max(
+        [max(indices) for indices in spans.values()]
+        + [int(relation.get("frame_idx", 0)) for relation in relations]
+        + [int(item.frame_idx) for item in pending]
+        + [max(0, int(processed_frames) - 1)]
+    )
+    left, right, top, row_height = 220, 70, 125, 54
+    width = 1800
+    height = max(300, top + max(1, len(track_ids)) * row_height + 115)
+    canvas = np.full((height, width, 3), (24, 28, 34), dtype=np.uint8)
+    plot_width = width - left - right
+
+    def x_at(frame_idx: int) -> int:
+        return int(left + round(plot_width * int(frame_idx) / max(1, max_frame)))
+
+    row_for_id = {track_id: top + index * row_height + 20 for index, track_id in enumerate(track_ids)}
+    cv2.putText(canvas, "Structural lineage timeline", (22, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (245, 245, 245), 2, cv2.LINE_AA)
+    review_count = sum(1 for relation in relations if relation.get("status") != "auto")
+    summary = (
+        f"object tracks: {len(track_ids)} | relations: {len(relations)} | "
+        f"needs review: {review_count} | unresolved endings: {len(pending)}"
+    )
+    cv2.putText(canvas, summary, (22, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (195, 210, 225), 1, cv2.LINE_AA)
+    cv2.putText(canvas, "frame", (left, 98), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (170, 185, 200), 1, cv2.LINE_AA)
+    for fraction in range(5):
+        frame = int(round(max_frame * fraction / 4))
+        x = x_at(frame)
+        cv2.line(canvas, (x, top - 8), (x, height - 55), (54, 61, 72), 1)
+        cv2.putText(canvas, str(frame), (x - 14, 98), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (170, 185, 200), 1, cv2.LINE_AA)
+
+    for track_id in track_ids:
+        y = row_for_id[track_id]
+        color = _track_color(track_id)
+        cv2.putText(canvas, f"ID {track_id}", (22, y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.58, color, 2, cv2.LINE_AA)
+        cv2.line(canvas, (left, y), (width - right, y), (42, 48, 56), 1)
+        frames = spans.get(track_id, [])
+        if not frames:
+            cv2.putText(canvas, "no saved mask", (left + 8, y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (70, 155, 255), 1, cv2.LINE_AA)
+            continue
+        segment_start = frames[0]
+        previous = frames[0]
+        for frame in frames[1:] + [None]:
+            if frame is not None and int(frame) <= int(previous) + 1:
+                previous = int(frame)
+                continue
+            cv2.line(canvas, (x_at(segment_start), y), (x_at(previous), y), color, 6, cv2.LINE_AA)
+            cv2.circle(canvas, (x_at(segment_start), y), 4, color, -1, cv2.LINE_AA)
+            cv2.circle(canvas, (x_at(previous), y), 4, color, -1, cv2.LINE_AA)
+            if frame is not None:
+                segment_start = int(frame)
+                previous = int(frame)
+
+    for relation in relations:
+        frame = int(relation.get("frame_idx", 0))
+        x = x_at(frame)
+        status = str(relation.get("status", "auto"))
+        relation_type = str(relation.get("type", "relation"))
+        color = (74, 215, 95) if status == "auto" else (55, 75, 255)
+        cv2.line(canvas, (x, top - 15), (x, height - 55), color, 1, cv2.LINE_AA)
+        cv2.putText(canvas, "S" if relation_type == "separation" else "J", (x - 6, top - 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
+        for parent_id in relation.get("predecessor_ids", []):
+            parent_y = row_for_id.get(int(parent_id))
+            if parent_y is None:
+                continue
+            for child_id in relation.get("successor_ids", []):
+                child_y = row_for_id.get(int(child_id))
+                if child_y is not None:
+                    cv2.arrowedLine(canvas, (x - 15, parent_y), (x + 16, child_y), color, 2, cv2.LINE_AA, tipLength=0.22)
+
+    for item in pending:
+        y = row_for_id.get(int(item.track_id))
+        if y is None:
+            continue
+        x = x_at(int(item.frame_idx))
+        cv2.rectangle(canvas, (x - 5, y - 11), (x + 5, y + 11), (0, 165, 255), -1)
+        cv2.putText(canvas, "?", (x - 5, y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (25, 25, 25), 2, cv2.LINE_AA)
+
+    cv2.putText(canvas, "green: auto relation | red: needs review | orange ?: unresolved ending", (22, height - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 210, 220), 1, cv2.LINE_AA)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = output_path.with_name(f"{output_path.stem}.tmp.png")
+    if not cv2.imwrite(str(temporary_path), canvas):
+        raise RuntimeError(f"Failed to write lineage graph: {temporary_path}")
+    temporary_path.replace(output_path)
+
+
 def _require(path: Path, label: str) -> None:
     if not path.exists():
         raise RuntimeError(f"{label} not found: {path}")
@@ -282,12 +406,29 @@ def _make_lineage_gui_class(gui):
                 json.dump(self.lineage.payload(), handle, ensure_ascii=False, indent=2)
             temporary.replace(relation_path)
 
+            graph_path = output_dir / "lineage_graph.png"
+            graph_saved = False
+            try:
+                _render_lineage_graph(
+                    graph_path,
+                    track_store=self.track_store,
+                    relations=self.lineage.relations,
+                    pending=self.lineage.pending,
+                    object_category_id=int(self.args.category_id),
+                    processed_frames=int(self.frame_idx + 1),
+                )
+                graph_saved = True
+            except Exception as exc:
+                print(f"[Lineage] Graph rendering skipped: {exc}")
+
             session_path = output_dir / str(self.args.session_meta_out)
             try:
                 with session_path.open("r", encoding="utf-8") as handle:
                     session = json.load(handle)
                 session["lineage_relations"] = str(relation_path.resolve())
                 session["auto_relation_count"] = len(self.lineage.relations)
+                if graph_saved:
+                    session["lineage_graph"] = str(graph_path.resolve())
                 temporary_session = session_path.with_suffix(".json.tmp")
                 with temporary_session.open("w", encoding="utf-8") as handle:
                     json.dump(session, handle, ensure_ascii=False, indent=2)
@@ -296,6 +437,8 @@ def _make_lineage_gui_class(gui):
                 print(f"[Lineage] Session metadata update skipped: {exc}")
 
             print(f"[Lineage] Saved relations: {relation_path} ({len(self.lineage.relations)} confirmed)")
+            if graph_saved:
+                print(f"[Lineage] Saved graph: {graph_path}")
 
     return LineageInteractiveSam2Gui
 
