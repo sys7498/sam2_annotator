@@ -56,20 +56,50 @@ def mask_to_coco_rle(mask: np.ndarray) -> Dict[str, Any]:
         mask = mask[..., 0]
     mask_u8 = mask.astype(np.uint8)
     h, w = mask_u8.shape[:2]
-    # COCO expects column-major order (Fortran order)
-    flat = mask_u8.T.reshape(-1)
-    counts: List[int] = []
-    prev = 0
-    run = 0
-    for v in flat:
-        if int(v) == prev:
-            run += 1
-        else:
-            counts.append(run)
-            run = 1
-            prev = int(v)
-    counts.append(run)
+    # COCO expects column-major order (Fortran order).  This used to loop over
+    # every pixel in Python, which made interactive propagation slow at 2K/4K.
+    flat = np.asfortranarray(mask_u8).reshape(-1, order="F")
+    if flat.size == 0:
+        return {"counts": [], "size": [int(h), int(w)]}
+    boundaries = np.flatnonzero(flat[1:] != flat[:-1]) + 1
+    counts_array = np.diff(np.concatenate(([0], boundaries, [flat.size]))).astype(np.int64)
+    counts = counts_array.tolist()
+    if int(flat[0]) == 1:
+        counts.insert(0, 0)
     return {"counts": counts, "size": [int(h), int(w)]}
+
+
+def coco_rle_to_mask(rle: Dict[str, Any]) -> np.ndarray:
+    """Decode this project's uncompressed column-major COCO RLE to bool."""
+    if not isinstance(rle, dict):
+        return np.zeros((0, 0), dtype=bool)
+    size = rle.get("size", [])
+    counts = rle.get("counts", [])
+    if not isinstance(size, (list, tuple)) or len(size) != 2 or not isinstance(counts, list):
+        return np.zeros((0, 0), dtype=bool)
+    try:
+        height, width = int(size[0]), int(size[1])
+    except Exception:
+        return np.zeros((0, 0), dtype=bool)
+    if height <= 0 or width <= 0:
+        return np.zeros((0, 0), dtype=bool)
+
+    flat = np.zeros(height * width, dtype=np.uint8)
+    offset = 0
+    value = 0
+    for count in counts:
+        try:
+            run = max(0, int(count))
+        except Exception:
+            return np.zeros((height, width), dtype=bool)
+        end = min(flat.size, offset + run)
+        if value and end > offset:
+            flat[offset:end] = 1
+        offset = end
+        value = 1 - value
+        if offset >= flat.size:
+            break
+    return flat.reshape((width, height)).T.astype(bool)
 
 
 def build_gt_image_id_map(gt_path: Optional[str]) -> Dict[str, int]:

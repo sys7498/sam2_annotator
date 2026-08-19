@@ -18,7 +18,7 @@ for p in [PROJECT_ROOT, SAM2_ROOT]:
     if p not in sys.path:
         sys.path.insert(0, p)
 
-from utils import bbox_xywh_from_mask, ensure_dir, get_image_paths, mask_to_coco_rle
+from utils import bbox_xywh_from_mask, coco_rle_to_mask, ensure_dir, get_image_paths, mask_to_coco_rle
 
 
 def _resolve_under(root: str, path: str) -> str:
@@ -122,6 +122,32 @@ class StreamFrameSource:
             name = f"{self.read_count:06d}.jpg"
             self.read_count += 1
             return frame, name
+
+    def read_at(self, frame_idx: int) -> Optional[Tuple[np.ndarray, str]]:
+        """Read an absolute input frame and position subsequent reads after it."""
+        index = int(frame_idx)
+        if index < 0:
+            return None
+        if self.total_frames is not None and index >= int(self.total_frames):
+            return None
+        if self._mode in {"dir", "image"}:
+            if index >= len(self._paths):
+                return None
+            path = self._paths[index]
+            frame = cv2.imread(path)
+            if frame is None:
+                return None
+            self._path_idx = index + 1
+            self.read_count = index + 1
+            return frame, os.path.basename(path)
+        if self._cap is None:
+            return None
+        self._cap.set(cv2.CAP_PROP_POS_FRAMES, index)
+        ok, frame = self._cap.read()
+        if not ok:
+            return None
+        self.read_count = index + 1
+        return frame, f"{index:06d}.jpg"
 
     def close(self) -> None:
         if self._cap is not None:
@@ -467,6 +493,20 @@ class YTVISTrackStore:
         if not tr_frames:
             self.tracks.pop(tid, None)
 
+    def masks_at_frame(self, frame_idx: int) -> Dict[int, np.ndarray]:
+        """Reconstruct visible masks for one stored frame without SAM2 inference."""
+        result: Dict[int, np.ndarray] = {}
+        for track_id, track in self.tracks.items():
+            if not isinstance(track, dict):
+                continue
+            frame_entry = track.get("frames", {}).get(int(frame_idx))
+            if not isinstance(frame_entry, dict):
+                continue
+            mask = coco_rle_to_mask(frame_entry.get("segmentation", {}))
+            if mask.size > 0 and np.any(mask):
+                result[int(track_id)] = mask
+        return result
+
     def rename_track(self, old_id: int, new_id: int) -> Tuple[bool, str]:
         old_id = int(old_id)
         new_id = int(new_id)
@@ -524,6 +564,12 @@ class InteractiveSam2Gui:
         self.frame_h, self.frame_w = self.current_frame.shape[:2]
         self.total_frames = self.frame_source.total_frames
         self.frame_idx = 0
+        # ``frame_idx`` is the immutable dataset timeline index.  After going
+        # back to edit an earlier frame we create a fresh streaming predictor,
+        # whose local index starts at zero again.
+        self.predictor_frame_idx = 0
+        self.max_frame_seen = 1
+        self.history_mode = False
         self.window_name = "SAM2 Interactive GUI"
 
         try:
@@ -713,7 +759,7 @@ class InteractiveSam2Gui:
             self._trim_predictor_state()
             return
         with self._inference_context():
-            ret = self.predictor.get_mask(self.inference_state, self.frame_idx)
+            ret = self.predictor.get_mask(self.inference_state, self.predictor_frame_idx)
         if not isinstance(ret, (tuple, list)) or len(ret) < 3:
             self._trim_predictor_state()
             return
@@ -739,9 +785,9 @@ class InteractiveSam2Gui:
         clear_fn = getattr(self.predictor, "clear_old_frames", None)
         if not callable(clear_fn):
             return
-        if self.frame_idx <= self.state_window:
+        if self.predictor_frame_idx <= self.state_window:
             return
-        min_valid = int(max(0, self.frame_idx - self.state_window))
+        min_valid = int(max(0, self.predictor_frame_idx - self.state_window))
         try:
             clear_fn(self.inference_state, min_valid)
         except Exception:
@@ -1093,13 +1139,79 @@ class InteractiveSam2Gui:
         else:
             self.active_obj_id = None
 
+    def _invalidate_future_annotations(self, start_frame: int) -> None:
+        """Discard masks that will be recomputed by forward-only tracking."""
+        start = int(max(0, start_frame))
+        for track_id in list(self.track_store.tracks.keys()):
+            self.track_store.trim_track_from_frame(int(track_id), start)
+        callback = getattr(self, "_on_future_annotations_invalidated", None)
+        if callable(callback):
+            callback(start)
+
+    def _prepare_history_for_forward_tracking(self) -> None:
+        """Seed a new streaming state from masks visible on the selected frame."""
+        if not self.history_mode:
+            return
+        seed_masks = self.track_store.masks_at_frame(self.frame_idx)
+        with self._inference_context():
+            self.inference_state = self.predictor.init_state(
+                self.current_frame,
+                offload_video_to_cpu=self.offload_video_to_cpu,
+                offload_state_to_cpu=self.offload_state_to_cpu,
+            )
+            self.predictor_frame_idx = 0
+            for track_id, mask in sorted(seed_masks.items()):
+                self.predictor.add_new_mask(
+                    self.inference_state,
+                    frame_idx=self.predictor_frame_idx,
+                    obj_id=int(track_id),
+                    mask=mask.astype(bool),
+                )
+        self.current_masks = seed_masks
+        self.object_ids = sorted(seed_masks)
+        self.prompt_states.clear()
+        self.history_mode = False
+        self._invalidate_future_annotations(self.frame_idx + 1)
+        self._sync_next_id()
+        self._ensure_active_id()
+        print(
+            f"[GUI] Resumed forward tracking from frame {self.frame_idx + 1}; "
+            f"future masks will be recomputed ({len(self.object_ids)} visible tracks)."
+        )
+
+    def _step_backward(self) -> bool:
+        target = int(self.frame_idx - 1)
+        if target < 0:
+            print("[GUI] Already at the first frame.")
+            return False
+        item = self.frame_source.read_at(target)
+        if item is None:
+            print(f"[GUI] Cannot load previous frame {target + 1}.")
+            return False
+        self.frame_idx = target
+        self.current_frame, self.current_frame_name = item
+        self.current_masks = self.track_store.masks_at_frame(self.frame_idx)
+        self.object_ids = sorted(self.current_masks)
+        self.prompt_states.clear()
+        self.edit_mode = False
+        self.edit_mask = None
+        self.playing = False
+        self.history_mode = True
+        self._sync_next_id()
+        self._ensure_active_id()
+        print(f"[GUI] Moved to previous frame {self.frame_idx + 1}. Edit it, then use Space to propagate forward.")
+        return True
+
     def _step_forward(self) -> bool:
+        self._prepare_history_for_forward_tracking()
         step_start = time.perf_counter()
         next_item = self.frame_source.read_next()
         if next_item is None:
             return False
         frame_load_elapsed = time.perf_counter() - step_start
         self.frame_idx += 1
+        self.predictor_frame_idx += 1
+        self.max_frame_seen = max(int(self.max_frame_seen), int(self.frame_idx + 1))
         self.current_frame, self.current_frame_name = next_item
         self.prompt_states.clear()
         self.edit_mode = False
@@ -1137,6 +1249,7 @@ class InteractiveSam2Gui:
         return int(new_id)
 
     def _run_click_update(self, obj_id: int, kind: Optional[str] = None) -> None:
+        self._prepare_history_for_forward_tracking()
         obj_id = int(obj_id)
         use_kind = self._register_track_kind(obj_id, kind or self._kind_for_track(obj_id))
         self.active_id_by_kind[use_kind] = int(obj_id)
@@ -1154,7 +1267,7 @@ class InteractiveSam2Gui:
         with self._inference_context():
             ret = self.predictor.add_new_points_or_box(
                 self.inference_state,
-                frame_idx=self.frame_idx,
+                frame_idx=self.predictor_frame_idx,
                 obj_id=int(obj_id),
                 points=points_np,
                 labels=labels_np,
@@ -1189,6 +1302,7 @@ class InteractiveSam2Gui:
             self._clear_active_prompts()
 
     def _run_box_update(self, obj_id: int, box_xyxy: List[int]) -> None:
+        self._prepare_history_for_forward_tracking()
         obj_id = int(obj_id)
         use_kind = self._register_track_kind(obj_id, self._kind_for_track(obj_id))
         self.active_id_by_kind[use_kind] = int(obj_id)
@@ -1210,7 +1324,7 @@ class InteractiveSam2Gui:
         with self._inference_context():
             ret = self.predictor.add_new_points_or_box(
                 self.inference_state,
-                frame_idx=self.frame_idx,
+                frame_idx=self.predictor_frame_idx,
                 obj_id=int(obj_id),
                 box=box_np,
                 clear_old_points=True,
@@ -1236,6 +1350,7 @@ class InteractiveSam2Gui:
         self._ensure_active_id()
 
     def _clear_active_prompts(self) -> None:
+        self._prepare_history_for_forward_tracking()
         if self.active_obj_id is None:
             return
         state_ids = set(self.inference_state.get("obj_ids", [])) if isinstance(self.inference_state, dict) else set()
@@ -1247,7 +1362,7 @@ class InteractiveSam2Gui:
             with self._inference_context():
                 ret = self.predictor.clear_all_prompts_in_frame(
                     self.inference_state,
-                    frame_idx=self.frame_idx,
+                    frame_idx=self.predictor_frame_idx,
                     obj_id=int(self.active_obj_id),
                     need_output=True,
                 )
@@ -1265,6 +1380,7 @@ class InteractiveSam2Gui:
         self._trim_predictor_state()
 
     def _delete_object_by_id(self, obj_id: int) -> None:
+        self._prepare_history_for_forward_tracking()
         obj_id = int(obj_id)
         obj_kind = self._kind_for_track(int(obj_id))
         try:
@@ -1332,6 +1448,7 @@ class InteractiveSam2Gui:
             self._delete_object_by_id(int(did))
 
     def _rename_active_object(self, new_id: int) -> None:
+        self._prepare_history_for_forward_tracking()
         if self.active_obj_id is None:
             return
         old_id = int(self.active_obj_id)
@@ -1370,7 +1487,7 @@ class InteractiveSam2Gui:
         with self._inference_context():
             ret = self.predictor.add_new_mask(
                 self.inference_state,
-                frame_idx=self.frame_idx,
+                frame_idx=self.predictor_frame_idx,
                 obj_id=new_id,
                 mask=old_mask,
             )
@@ -1446,6 +1563,7 @@ class InteractiveSam2Gui:
         self.paint_mode = 0
 
     def _apply_edit_mask(self) -> None:
+        self._prepare_history_for_forward_tracking()
         if not self.edit_mode or self.edit_mask is None or self.active_obj_id is None:
             return
         obj_id = int(self.active_obj_id)
@@ -1454,7 +1572,7 @@ class InteractiveSam2Gui:
         with self._inference_context():
             ret = self.predictor.add_new_mask(
                 self.inference_state,
-                frame_idx=self.frame_idx,
+                frame_idx=self.predictor_frame_idx,
                 obj_id=obj_id,
                 mask=self.edit_mask.astype(bool),
             )
@@ -1611,6 +1729,9 @@ class InteractiveSam2Gui:
             return False
         if key == ord("."):
             self._step_forward()
+            return False
+        if key == ord(","):
+            self._step_backward()
             return False
 
         # ID select
@@ -1836,7 +1957,7 @@ class InteractiveSam2Gui:
                 f"next object: {self.next_obj_id} | next hand: {self.next_hand_id}"
             ),
             "Mouse: left click/drag object | Shift + left click/drag hand | right click negative",
-            "Keys: Space next | n object | h hand | [ ] ID | e edit prompts | d delete | s save | q exit",
+            "Keys: Space/. next | , previous | n object | h hand | [ ] ID | e edit prompts | d delete | s save | q exit",
             "More: p active prompts | b brush edit | a apply brush | g select | c rename | t crop | o outline",
         ]
         y0 = self._display_distance(30.0)
@@ -1926,7 +2047,7 @@ class InteractiveSam2Gui:
         payload = {
             "video_name": self.video_name,
             "input": os.path.abspath(self.args.input),
-            "num_frames_processed": int(self.frame_idx + 1),
+            "num_frames_processed": int(self.max_frame_seen),
             "num_frames_total_hint": int(self.total_frames) if self.total_frames is not None else None,
             "video_id": int(self.args.video_id),
             "category_id": int(self.args.category_id),

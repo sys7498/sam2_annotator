@@ -391,6 +391,21 @@ def _make_lineage_gui_class(gui):
                     f"({relation['type']}, {relation['status']})"
                 )
 
+        def _on_future_annotations_invalidated(self, start_frame: int) -> None:
+            """Keep existing lineage evidence visible, but flag rewound events."""
+            cutoff = int(start_frame)
+            self.lineage.pending = [item for item in self.lineage.pending if item.frame_idx < cutoff]
+            self.lineage.recent_children = [
+                (track_id, frame_idx)
+                for track_id, frame_idx in self.lineage.recent_children
+                if frame_idx < cutoff
+            ]
+            for relation in self.lineage.relations:
+                if int(relation.get("frame_idx", -1)) >= cutoff:
+                    relation["status"] = "needs_review"
+                    relation["invalidated_by_rewind"] = True
+            print(f"[Lineage] Future relations from frame {cutoff + 1} marked needs_review.")
+
         def _handle_key(self, key: int) -> bool:
             if int(key & 0xFF) == ord("l"):
                 self._log_key(int(key))
@@ -416,7 +431,7 @@ def _make_lineage_gui_class(gui):
                     relations=self.lineage.relations,
                     pending=self.lineage.pending,
                     object_category_id=int(self.args.category_id),
-                    processed_frames=int(self.frame_idx + 1),
+                    processed_frames=int(getattr(self, "max_frame_seen", self.frame_idx + 1)),
                 )
                 graph_saved = True
             except Exception as exc:
