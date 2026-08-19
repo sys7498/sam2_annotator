@@ -28,7 +28,7 @@ nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
 if command -v sudo >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
   echo "== Installing OpenCV runtime libraries =="
   sudo apt-get update
-  sudo apt-get install -y libgl1 libglib2.0-0 ffmpeg
+  sudo apt-get install -y libgl1 libglib2.0-0 ffmpeg fontconfig fonts-dejavu-core
 fi
 
 if ! conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then
@@ -42,6 +42,14 @@ conda run -n "$ENV_NAME" python -m pip install \
   torch==2.5.1 torchvision==0.20.1 \
   --index-url https://download.pytorch.org/whl/cu121
 conda run -n "$ENV_NAME" python -m pip install -r "$PROJECT_ROOT/requirements.txt"
+
+# Some OpenCV wheels look for ``cv2/qt/fonts`` even on a WSLg desktop. Link
+# the system DejaVu font directory so Qt does not emit a warning for every
+# window it opens. Existing packaged fonts are left unchanged.
+CV2_QT_DIR="$(conda run -n "$ENV_NAME" python -c 'import cv2; from pathlib import Path; print(Path(cv2.__file__).resolve().parent / "qt")')"
+if [[ -d "$CV2_QT_DIR" && -d /usr/share/fonts/truetype/dejavu && ! -e "$CV2_QT_DIR/fonts" ]]; then
+  ln -s /usr/share/fonts/truetype/dejavu "$CV2_QT_DIR/fonts"
+fi
 
 mkdir -p "$CHECKPOINT_DIR"
 if [[ ! -f "$CHECKPOINT_PATH" ]]; then
