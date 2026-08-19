@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Sample Aria raw MP4s to 5 fps while preserving participant/subfolder layout.
+# Sample Aria raw MP4s to 5 fps JPEG frame sequences while preserving layout.
 set -euo pipefail
 
 ARIA_RECORDING_ROOT="${ARIA_RECORDING_ROOT:-/workspace/shared/aria_recording}"
@@ -22,7 +22,8 @@ Examples:
 
 The default source is /workspace/shared/aria_recording/raw/<participant_folder>.
 Output is written to /workspace/shared/aria_recording/5fps_sampled/<participant_folder>,
-with every intermediate directory preserved. Set ARIA_RECORDING_ROOT to override this root.
+with every intermediate directory preserved. Each `rgb.mp4` becomes an `rgb/` folder
+with `000000.jpg`, `000001.jpg`, ... at 5 fps. Set ARIA_RECORDING_ROOT to override this root.
 EOF
 }
 
@@ -87,27 +88,38 @@ for participant_name in "${PARTICIPANTS[@]}"; do
   while IFS= read -r -d '' source_path; do
     found=1
     relative_path="${source_path#"$source_dir"/}"
-    output_path="$destination_dir/${relative_path%.*}.mp4"
-    if [[ -f "$output_path" && "$OVERWRITE" -ne 1 ]]; then
-      if ffprobe -v error -select_streams v:0 -show_entries stream=codec_name \
-        -of default=nw=1:nk=1 "$output_path" >/dev/null 2>&1; then
-        echo "[skip] $participant_name/$relative_path (already exists)"
+    output_dir="$destination_dir/${relative_path%.*}"
+    if [[ -d "$output_dir" && "$OVERWRITE" -ne 1 ]]; then
+      if find "$output_dir" -maxdepth 1 -type f -iname '*.jpg' -print -quit | grep -q .; then
+        echo "[skip] $participant_name/$relative_path (JPEG frames already exist)"
         ((skipped_total += 1))
         continue
       fi
-      echo "[repair] $participant_name/$relative_path (invalid prior output)"
+      echo "[repair] $participant_name/$relative_path (empty prior output directory)"
     fi
-    echo "[5 fps] $participant_name/$relative_path"
+    echo "[5 fps JPEG] $participant_name/$relative_path"
     if [[ "$DRY_RUN" -ne 1 ]]; then
-      mkdir -p "$(dirname "$output_path")"
-      temporary_path="${output_path%.mp4}.partial.mp4"
+      mkdir -p "$(dirname "$output_dir")"
+      temporary_dir="${output_dir}.partial.$$"
+      rm -rf -- "$temporary_dir"
+      mkdir -p "$temporary_dir"
       # ffmpeg otherwise consumes this loop's stdin (the NUL-delimited find
       # result) as interactive commands and stops after the first video.
       ffmpeg -nostdin -hide_banner -loglevel warning -y -i "$source_path" \
         -map 0:v:0 -an -vf "fps=5" \
-        -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p -movflags +faststart \
-        "$temporary_path"
-      mv -f "$temporary_path" "$output_path"
+        -q:v 2 -start_number 0 "$temporary_dir/%06d.jpg"
+      if ! find "$temporary_dir" -maxdepth 1 -type f -iname '*.jpg' -print -quit | grep -q .; then
+        echo "No JPEG frames were generated for: $source_path" >&2
+        exit 1
+      fi
+      if [[ -d "$output_dir" ]]; then
+        if [[ "$OVERWRITE" -ne 1 ]]; then
+          echo "Output directory appeared while sampling: $output_dir" >&2
+          exit 1
+        fi
+        rm -rf -- "$output_dir"
+      fi
+      mv "$temporary_dir" "$output_dir"
     fi
     ((processed_total += 1))
   done < <(find "$source_dir" -type f ! -name '.*' ! -name '._*' -iname '*.mp4' -print0 | sort -z)

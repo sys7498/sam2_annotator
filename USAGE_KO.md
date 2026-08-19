@@ -32,19 +32,22 @@ python desktop_annotator.py --dataset /mnt/c/path/to/videos
 `raw/<사람>/<작업>/rgb.mp4`처럼 중간 폴더가 추가돼도 자동으로 찾고,
 결과도 `outputs/<사람>/<작업>/rgb/`로 분리되어 같은 `rgb.mp4` 파일명이 충돌하지 않는다.
 
-## Aria raw 영상 5fps 샘플링
+## Aria raw 영상 5fps 프레임 추출
 
-사람 폴더 하나의 MP4를 재귀적으로 찾아 5fps 영상으로 만든다. 원본의 중간 폴더 구조를 보존한다.
+사람 폴더 하나의 MP4를 재귀적으로 찾아 5fps JPEG 프레임 시퀀스로 만든다. 원본의 중간 폴더 구조를 보존한다.
 
 ```bash
 # 먼저 어떤 파일이 처리될지 확인
 bash scripts/sample_aria_recording_5fps.sh jdh --dry-run
 
-# raw/jdh/**/rgb.mp4 → 5fps_sampled/jdh/**/rgb.mp4
+# raw/jdh/**/rgb.mp4 → 5fps_sampled/jdh/**/rgb/000000.jpg
 bash scripts/sample_aria_recording_5fps.sh jdh
 
 # 이미 만든 파일도 다시 생성
 bash scripts/sample_aria_recording_5fps.sh jdh --overwrite
+
+# raw/ 아래 모든 사람 폴더 변환
+bash scripts/sample_aria_recording_5fps.sh --all
 ```
 
 기본 경로는 `/workspace/shared/aria_recording/`이며, 다른 위치에서는 아래처럼 지정한다.
@@ -54,8 +57,8 @@ ARIA_RECORDING_ROOT=/다른/aria_recording \
   bash scripts/sample_aria_recording_5fps.sh jdh
 ```
 
-macOS metadata 파일(`._rgb.mp4`)은 자동으로 건너뛴다. 샘플 영상은 annotation 용도이므로
-audio를 포함하지 않는다.
+macOS metadata 파일(`._rgb.mp4`)은 자동으로 건너뛴다. JPEG 품질은 FFmpeg `-q:v 2`이며,
+audio는 추출하지 않는다. 중단된 작업은 완성된 `rgb/` 폴더를 건너뛰고 나머지부터 재개한다.
 
 ## 2. 기본 작업 흐름
 
