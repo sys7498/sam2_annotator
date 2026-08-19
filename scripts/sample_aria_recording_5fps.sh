@@ -89,19 +89,25 @@ for participant_name in "${PARTICIPANTS[@]}"; do
     relative_path="${source_path#"$source_dir"/}"
     output_path="$destination_dir/${relative_path%.*}.mp4"
     if [[ -f "$output_path" && "$OVERWRITE" -ne 1 ]]; then
-      echo "[skip] $participant_name/$relative_path (already exists)"
-      ((skipped_total += 1))
-      continue
+      if ffprobe -v error -select_streams v:0 -show_entries stream=codec_name \
+        -of default=nw=1:nk=1 "$output_path" >/dev/null 2>&1; then
+        echo "[skip] $participant_name/$relative_path (already exists)"
+        ((skipped_total += 1))
+        continue
+      fi
+      echo "[repair] $participant_name/$relative_path (invalid prior output)"
     fi
     echo "[5 fps] $participant_name/$relative_path"
     if [[ "$DRY_RUN" -ne 1 ]]; then
       mkdir -p "$(dirname "$output_path")"
+      temporary_path="${output_path%.mp4}.partial.mp4"
       # ffmpeg otherwise consumes this loop's stdin (the NUL-delimited find
       # result) as interactive commands and stops after the first video.
       ffmpeg -nostdin -hide_banner -loglevel warning -y -i "$source_path" \
         -map 0:v:0 -an -vf "fps=5" \
         -c:v libx264 -preset medium -crf 18 -pix_fmt yuv420p -movflags +faststart \
-        "$output_path"
+        "$temporary_path"
+      mv -f "$temporary_path" "$output_path"
     fi
     ((processed_total += 1))
   done < <(find "$source_dir" -type f ! -name '.*' ! -name '._*' -iname '*.mp4' -print0 | sort -z)
