@@ -133,6 +133,7 @@ class AppArgs:
     output_dir: str
     ytvis_out: str
     session_meta_out: str
+    display_name: Optional[str] = None
     video_id: int = 1
     category_id: int = 1
     hand_category_id: int = 0
@@ -309,7 +310,7 @@ class SequencePickerGui:
             y = int(top_y + row * self.line_h)
             args = self.args_list[idx]
             input_path = str(args.input)
-            obj_name = str(args.ytvis_out).replace("_annotations_ytvis.json", "")
+            display_name = str(getattr(args, "display_name", None) or os.path.basename(input_path))
             out_path = self._out_path(args)
             done = os.path.exists(out_path)
             is_sel = (idx == self.selected)
@@ -317,7 +318,7 @@ class SequencePickerGui:
                 cv2.rectangle(canvas, (8, y - 18), (self.window_w - 8, y + 8), (56, 88, 130), -1)
             status = "DONE" if done else "TODO"
             color = (120, 230, 140) if done else (235, 235, 235)
-            line = f"{idx + 1:03d}. [{status}] {obj_name} | input: {os.path.basename(input_path)} | out: {os.path.basename(out_path)}"
+            line = f"{idx + 1:03d}. [{status}] {display_name}"
             cv2.putText(canvas, line[:200], (16, y), cv2.FONT_HERSHEY_SIMPLEX, 0.52, color, 1, cv2.LINE_AA)
 
         return canvas

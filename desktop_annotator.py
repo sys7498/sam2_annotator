@@ -472,6 +472,7 @@ def _make_args(
         output_dir=str(output_dir),
         ytvis_out=ytvis_out,
         session_meta_out=session_meta_out,
+        display_name=(relative_input.as_posix() if relative_input is not None else input_path.name),
         video_id=int(options.video_id),
         category_id=int(options.category_id),
         hand_category_id=int(options.hand_category_id),
