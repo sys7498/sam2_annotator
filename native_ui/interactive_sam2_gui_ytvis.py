@@ -4,7 +4,7 @@ import json
 import os
 import sys
 import time
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -630,13 +630,22 @@ class InteractiveSam2Gui:
         return int(sum(1 for x in payload if isinstance(x, dict)))
 
     def _inference_context(self):
+        """Use SAM2's recommended BF16 CUDA inference path when available."""
+        contexts = ExitStack()
         inference_mode = getattr(self._torch, "inference_mode", None)
         if callable(inference_mode):
-            return inference_mode()
-        no_grad = getattr(self._torch, "no_grad", None)
-        if callable(no_grad):
-            return no_grad()
-        return nullcontext()
+            contexts.enter_context(inference_mode())
+        else:
+            no_grad = getattr(self._torch, "no_grad", None)
+            if callable(no_grad):
+                contexts.enter_context(no_grad())
+            else:
+                contexts.enter_context(nullcontext())
+
+        autocast = getattr(self._torch, "autocast", None)
+        if str(self.device).startswith("cuda") and callable(autocast):
+            contexts.enter_context(autocast(device_type="cuda", dtype=self._torch.bfloat16))
+        return contexts
 
     def _resize_display_window(self) -> None:
         target_w = int(max(320, self.window_width))
