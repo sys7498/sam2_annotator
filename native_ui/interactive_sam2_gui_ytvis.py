@@ -968,7 +968,7 @@ class InteractiveSam2Gui:
         oid = int(self.active_obj_id)
         self.prompt_states.setdefault(oid, PromptState())
         print(f"[GUI] Prompt editor for ID {oid}")
-        print("[GUI] cmds: '+ x y', '- x y', 'pop+', 'pop-', 'clear', 'apply', 'status', 'q'")
+        print("[GUI] cmds: '+ x y', '- x y', 'del+ N', 'del- N', 'list', 'clear', 'apply', 'status', 'q'")
         while True:
             p_cnt, n_cnt = self._prompt_counts(oid)
             try:
@@ -988,21 +988,42 @@ class InteractiveSam2Gui:
                 self._clear_active_prompts()
                 continue
             if cmd == "apply":
-                self._run_click_update(oid)
+                self._apply_prompt_state(oid)
+                continue
+            if cmd == "list":
+                ps = self.prompt_states.setdefault(oid, PromptState())
+                print(f"[GUI] + prompts: {list(enumerate(ps.pos_points, start=1))}")
+                print(f"[GUI] - prompts: {list(enumerate(ps.neg_points, start=1))}")
                 continue
             if cmd == "pop+":
                 ps = self.prompt_states.setdefault(oid, PromptState())
                 if ps.pos_points:
                     ps.pos_points.pop()
-                self._run_click_update(oid)
+                self._apply_prompt_state(oid)
                 continue
             if cmd == "pop-":
                 ps = self.prompt_states.setdefault(oid, PromptState())
                 if ps.neg_points:
                     ps.neg_points.pop()
-                self._run_click_update(oid)
+                self._apply_prompt_state(oid)
                 continue
             toks = raw.split()
+            if len(toks) == 2 and toks[0].lower() in {"del+", "del-"}:
+                try:
+                    prompt_index = int(toks[1]) - 1
+                    if prompt_index < 0:
+                        raise ValueError()
+                except Exception:
+                    print("[GUI] use a 1-based prompt index, e.g. del+ 1")
+                    continue
+                ps = self.prompt_states.setdefault(oid, PromptState())
+                prompts = ps.pos_points if toks[0].lower() == "del+" else ps.neg_points
+                if prompt_index >= len(prompts):
+                    print(f"[GUI] prompt index out of range: {prompt_index + 1}")
+                    continue
+                prompts.pop(prompt_index)
+                self._apply_prompt_state(oid)
+                continue
             if len(toks) == 3 and toks[0] in {"+", "-"}:
                 try:
                     x = int(float(toks[1]))
@@ -1017,9 +1038,27 @@ class InteractiveSam2Gui:
                     ps.pos_points.append((x, y))
                 else:
                     ps.neg_points.append((x, y))
-                self._run_click_update(oid)
+                self._apply_prompt_state(oid)
                 continue
-            print("[GUI] unknown cmd. use '+ x y', '- x y', pop+, pop-, clear, apply, status, q")
+            print("[GUI] unknown cmd. use '+ x y', '- x y', del+ N, del- N, list, clear, apply, status, q")
+
+    def _prompt_edit_track_prompts(self) -> None:
+        """Select an existing ID, then edit its positive/negative prompts."""
+        self._print_status()
+        try:
+            raw = input("[GUI] Edit mask for track ID (empty=cancel): ").strip()
+        except Exception as exc:
+            print(f"[GUI] input failed: {exc}")
+            return
+        if not raw:
+            return
+        try:
+            track_id = int(raw)
+        except Exception:
+            print(f"[GUI] invalid id: {raw}")
+            return
+        if self._set_active_object_by_id(track_id, create_if_missing=False):
+            self._prompt_edit_active_prompts()
 
     def _prompt_new_object_id(self) -> None:
         self._print_status()
@@ -1055,9 +1094,11 @@ class InteractiveSam2Gui:
             self.active_obj_id = None
 
     def _step_forward(self) -> bool:
+        step_start = time.perf_counter()
         next_item = self.frame_source.read_next()
         if next_item is None:
             return False
+        frame_load_elapsed = time.perf_counter() - step_start
         self.frame_idx += 1
         self.current_frame, self.current_frame_name = next_item
         self.prompt_states.clear()
@@ -1069,8 +1110,20 @@ class InteractiveSam2Gui:
                 self.current_frame,
                 offload_video_to_cpu=self.offload_video_to_cpu,
             )
+        backbone_elapsed = time.perf_counter() - step_start - frame_load_elapsed
+        tracking_start = time.perf_counter()
         self._refresh_from_tracker()
+        tracking_elapsed = time.perf_counter() - tracking_start
         self._maybe_gc()
+        total_elapsed = time.perf_counter() - step_start
+        print(
+            f"[GUI][Perf] frame {self.frame_idx + 1}: "
+            f"load={frame_load_elapsed * 1000:.0f}ms "
+            f"backbone={backbone_elapsed * 1000:.0f}ms "
+            f"track+decode={tracking_elapsed * 1000:.0f}ms "
+            f"total={total_elapsed * 1000:.0f}ms "
+            f"tracks={len(self.object_ids)}"
+        )
         return True
 
     def _create_new_active_object(self, kind: str = "object") -> int:
@@ -1124,6 +1177,16 @@ class InteractiveSam2Gui:
         self._trim_predictor_state()
         self._sync_next_id()
         self._ensure_active_id()
+
+    def _apply_prompt_state(self, obj_id: int) -> None:
+        """Recompute one ID's current-frame mask after an editor mutation."""
+        obj_id = int(obj_id)
+        self.active_obj_id = obj_id
+        pos_count, neg_count = self._prompt_counts(obj_id)
+        if pos_count + neg_count > 0:
+            self._run_click_update(obj_id)
+        else:
+            self._clear_active_prompts()
 
     def _run_box_update(self, obj_id: int, box_xyxy: List[int]) -> None:
         obj_id = int(obj_id)
@@ -1611,8 +1674,11 @@ class InteractiveSam2Gui:
             self._prompt_edit_active_prompts()
             return False
 
-        # edit mode / brush
+        # Prompt editor / brush edit mode
         if key == ord("e"):
+            self._prompt_edit_track_prompts()
+            return False
+        if key == ord("b"):
             if self.edit_mode:
                 self._cancel_edit_mode()
             else:
@@ -1770,8 +1836,8 @@ class InteractiveSam2Gui:
                 f"next object: {self.next_obj_id} | next hand: {self.next_hand_id}"
             ),
             "Mouse: left click/drag object | Shift + left click/drag hand | right click negative",
-            "Keys: Space next | n object | h hand | [ ] ID | d delete | e edit | s save | q exit",
-            "More: g select | c rename | p prompts | x clear | +/- brush | t crop | o outline",
+            "Keys: Space next | n object | h hand | [ ] ID | e edit prompts | d delete | s save | q exit",
+            "More: p active prompts | b brush edit | a apply brush | g select | c rename | t crop | o outline",
         ]
         y0 = self._display_distance(30.0)
         line_height = self._display_distance(30.0)

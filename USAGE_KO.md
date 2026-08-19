@@ -66,7 +66,8 @@ audio는 추출하지 않는다. 중단된 작업은 완성된 `rgb/` 폴더를 
 2. 대상 내부를 좌클릭하거나, 대상을 감싸서 좌드래그한다.
 3. 필요하면 대상 밖/원치 않는 부분을 우클릭해 negative point를 추가한다.
 4. `Space`로 다음 프레임으로 이동한다. SAM2가 현재 object를 다음 프레임으로 전파한다.
-5. 구조 변화나 tracking 오류가 보이는 프레임에서 prompt 또는 brush로 보정한다.
+5. 구조 변화나 tracking 오류가 보이는 프레임에서 `e`를 누르고 ID를 입력한 뒤 prompt를
+   추가/삭제해 보정한다. 필요할 때만 `b`로 brush 보정을 사용한다.
 6. `s`로 중간 저장한다. `q` 또는 창 닫기 시에도 자동 저장된다.
 
 화면의 mask 색, 윤곽선, `id:<번호>` 라벨로 현재 추적 상태를 확인한다. 활성 ID에는 `*`가 붙는다.
@@ -98,9 +99,11 @@ audio는 추출하지 않는다. 중단된 작업은 완성된 `rgb/` 폴더를 
 | `d` | 번호를 입력해 ID 하나 이상 삭제 |
 | `c`, `r` | 활성 ID 번호 변경 |
 | `x` | 활성 ID의 현재 프레임 point prompt 초기화 |
-| `p` | 터미널 prompt 편집기 열기 (`+ x y`, `- x y`, `clear`, `apply`) |
+| `e` | ID 입력 뒤 해당 ID의 터미널 prompt 편집기 열기 |
+| `p` | 현재 활성 ID의 터미널 prompt 편집기 바로 열기 |
+| prompt 편집기 | `+ x y`, `- x y`로 point 추가, `del+ N`, `del- N`으로 N번째 point 삭제, `list`, `clear`, `apply` |
 | `v` | 현재 ID·면적·prompt 상태를 터미널에 표시 |
-| `e` | brush mask 편집 모드 시작/취소 |
+| `b` | brush mask 편집 모드 시작/취소 |
 | `a` | brush 보정 mask를 SAM2 상태에 적용 |
 | `z` | brush 보정을 원본 mask로 되돌림 |
 | `+` / `-` | brush 크기 증가 / 감소 |

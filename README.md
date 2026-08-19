@@ -72,7 +72,8 @@ frame 상태를 정리하므로 과거 frame에서 수정하면 해당 frame까�
    자동 relation, 빨강은 재검수 필요 relation, 주황 `?`는 successor가 아직 없는 종료 ID다. 가림/추적 실패는 관계로 오인하지
    않도록, ID를 명시적으로 종료한 경우에만 자동 생성한다.
 4. `Space` 또는 `.`은 한 frame 전진하며 SAM2가 현재 ID를 다음 frame으로 전파한다.
-   `e`는 brush 보정, `a`는 보정 mask 적용, `s`는 저장이다.
+   `e`는 ID를 입력해 positive/negative prompt를 추가·삭제하는 mask 편집기이고, `b`는
+   brush 보정, `a`는 brush 보정 mask 적용, `s`는 저장이다.
 
 출력 JSON은 COCO-style uncompressed RLE를 포함한다. 연구 데이터의 target annotation
 rate(5 fps)에 맞춰 제출 전 sampling pass를 수행한다.
