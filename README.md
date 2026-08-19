@@ -26,6 +26,9 @@ checkpoint와 작업 영상/결과는 Git에 포함하지 않는다.
 Codex 또는 Claude Code에 환경 구성을 맡길 때는
 [PROMPT_FOR_CODEX_OR_CLAUDE_CODE_KO.md](PROMPT_FOR_CODEX_OR_CLAUDE_CODE_KO.md)를 전달하면 된다.
 
+전체 조작법, 모든 단축키, 자동 separation relation과 WSL 문제 해결은
+[USAGE_KO.md](USAGE_KO.md)에 정리했다.
+
 ## 실행
 
 ```bash
