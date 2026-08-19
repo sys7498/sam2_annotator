@@ -35,6 +35,30 @@ def _write_json_atomic(path: str, payload: Any) -> None:
     os.replace(tmp_path, path)
 
 
+def _format_key_event(key_raw: int) -> str:
+    """Return a readable OpenCV key event label for terminal logs."""
+    raw = int(key_raw)
+    key = int(raw & 0xFF)
+    special = {
+        27: "Esc",
+        10: "Enter",
+        13: "Enter",
+        32: "Space",
+        81: "Left",
+        82: "Up",
+        83: "Right",
+        84: "Down",
+    }
+    if key in special:
+        label = special[key]
+    elif 32 <= key <= 126:
+        character = chr(key)
+        label = f"Shift+{character.lower()}" if character.isalpha() and character.isupper() else repr(character)
+    else:
+        label = f"code {key}"
+    return f"{label} (raw={raw})" if raw != key else label
+
+
 class StreamFrameSource:
     def __init__(self, input_path: str, max_frames: Optional[int]) -> None:
         self.input_path = os.path.abspath(input_path)
@@ -337,6 +361,7 @@ class SequencePickerGui:
                 key = cv2.waitKey(30) & 0xFF
                 if key == 255:
                     continue
+                print(f"[Picker][Key] {_format_key_event(key)}")
                 if key in (27,):
                     return None
                 if key in (13, 10):
@@ -1500,6 +1525,7 @@ class InteractiveSam2Gui:
 
     def _handle_key(self, key: int) -> bool:
         key_raw = int(key)
+        self._log_key(key_raw)
         key = int(key_raw & 0xFF)
         key_has_modifier = bool(key_raw != key)
 
@@ -1609,6 +1635,10 @@ class InteractiveSam2Gui:
             return False
 
         return False
+
+    @staticmethod
+    def _log_key(key_raw: int) -> None:
+        print(f"[GUI][Key] {_format_key_event(key_raw)}")
 
     def _render_outline_only(self) -> np.ndarray:
         out = self.current_frame.copy()

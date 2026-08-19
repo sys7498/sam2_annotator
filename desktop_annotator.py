@@ -393,6 +393,7 @@ def _make_lineage_gui_class(gui):
 
         def _handle_key(self, key: int) -> bool:
             if int(key & 0xFF) == ord("l"):
+                self._log_key(int(key))
                 self._print_lineage()
                 return False
             return bool(super()._handle_key(key))
