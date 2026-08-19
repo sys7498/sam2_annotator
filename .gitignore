@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+.pytest_cache/
+data/*.sqlite3
+data/videos/
+outputs/
+vendor/sam2_realtime/checkpoints/*.pt
+vendor/sam2_realtime/sam2/_C.so

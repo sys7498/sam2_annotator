@@ -1,0 +1,390 @@
+#!/usr/bin/env python3
+"""Native OpenCV launcher for the SAM2 realtime mask annotator.
+
+This deliberately reuses the battle-tested interactive UI from hograph, now
+included in ``native_ui/``, and uses the self-contained SAM2 checkout.
+There is no HTTP, JSON image transport, or browser-side mask compositing in
+this path: the window receives frames directly from OpenCV.
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from dataclasses import dataclass, field
+from pathlib import Path
+from typing import Any, Iterable, List
+
+
+PROJECT_ROOT = Path(__file__).resolve().parent
+NATIVE_UI_ROOT = PROJECT_ROOT / "native_ui"
+SAM2_ROOT = PROJECT_ROOT / "vendor" / "sam2_realtime"
+
+
+@dataclass
+class _PendingPredecessor:
+    track_id: int
+    frame_idx: int
+    last_visible_frame: int
+
+
+@dataclass
+class _LineageRecorder:
+    """Conservative automatic lineage from an explicit ID lifecycle.
+
+    A raw tracking disappearance is not sufficient evidence for a separation:
+    it is also caused by occlusion or model loss.  We therefore only create an
+    automatic relation after the annotator explicitly ends an object ID and
+    creates two new object IDs at the same transition.
+    """
+
+    pending: List[_PendingPredecessor] = field(default_factory=list)
+    recent_children: List[tuple[int, int]] = field(default_factory=list)
+    relations: List[dict[str, Any]] = field(default_factory=list)
+    transition_window: int = 12
+
+    def _valid_pending(self, frame_idx: int) -> List[_PendingPredecessor]:
+        return [p for p in self.pending if frame_idx - p.frame_idx <= self.transition_window]
+
+    def end_predecessor(self, track_id: int, frame_idx: int) -> None:
+        if any(p.track_id == int(track_id) for p in self.pending):
+            return
+        self.pending.append(
+            _PendingPredecessor(int(track_id), int(frame_idx), max(0, int(frame_idx) - 1))
+        )
+        self._try_create_relation(int(frame_idx))
+
+    def add_child(self, track_id: int, frame_idx: int) -> None:
+        if any(child_id == int(track_id) for child_id, _ in self.recent_children):
+            return
+        self.recent_children.append((int(track_id), int(frame_idx)))
+        self._try_create_relation(int(frame_idx))
+
+    def _try_create_relation(self, frame_idx: int) -> None:
+        candidates = self._valid_pending(int(frame_idx))
+        # Two distinct parents ending together is ambiguous; do not guess.
+        if len(candidates) != 1:
+            return
+        parent = candidates[0]
+        children = sorted(
+            {
+                child_id
+                for child_id, child_frame in self.recent_children
+                if abs(int(child_frame) - int(parent.frame_idx)) <= self.transition_window
+                and int(child_id) != int(parent.track_id)
+            }
+        )
+        if len(children) != 2:
+            return
+        relation = {
+            "relation_id": f"auto-separation-{len(self.relations) + 1:04d}",
+            "type": "separation",
+            "predecessor_ids": [int(parent.track_id)],
+            "successor_ids": [int(children[0]), int(children[1])],
+            "frame_idx": int(max(frame_idx, parent.frame_idx)),
+            "predecessor_last_visible_frame": int(parent.last_visible_frame),
+            "source": "auto_id_lifecycle",
+            "status": "auto",
+        }
+        self.relations.append(relation)
+        self.pending.remove(parent)
+        self.recent_children = [
+            (child_id, child_frame)
+            for child_id, child_frame in self.recent_children
+            if child_id not in set(children)
+        ]
+        print(
+            "[Lineage] Auto separation: "
+            f"predecessor {parent.track_id} -> successors {children[0]}, {children[1]} "
+            f"at frame {relation['frame_idx'] + 1}"
+        )
+
+    def rename_id(self, old_id: int, new_id: int) -> None:
+        for pending in self.pending:
+            if pending.track_id == int(old_id):
+                pending.track_id = int(new_id)
+        self.recent_children = [
+            (int(new_id) if child_id == int(old_id) else child_id, child_frame)
+            for child_id, child_frame in self.recent_children
+        ]
+        for relation in self.relations:
+            relation["predecessor_ids"] = [
+                int(new_id) if item == int(old_id) else item for item in relation["predecessor_ids"]
+            ]
+            relation["successor_ids"] = [
+                int(new_id) if item == int(old_id) else item for item in relation["successor_ids"]
+            ]
+
+    def mark_successor_deleted(self, track_id: int) -> None:
+        for relation in self.relations:
+            if int(track_id) not in relation.get("successor_ids", []):
+                continue
+            relation["status"] = "needs_review"
+            removed = relation.setdefault("deleted_successor_ids", [])
+            if int(track_id) not in removed:
+                removed.append(int(track_id))
+
+    def payload(self) -> dict[str, Any]:
+        return {
+            "schema_version": "1.0",
+            "relation_direction": "predecessor_to_successor",
+            "auto_rule": "explicit parent ID deletion plus exactly two new object IDs within 12 frames",
+            "relations": self.relations,
+            "pending_predecessors": [
+                {
+                    "track_id": item.track_id,
+                    "frame_idx": item.frame_idx,
+                    "last_visible_frame": item.last_visible_frame,
+                }
+                for item in self.pending
+            ],
+        }
+
+
+def _require(path: Path, label: str) -> None:
+    if not path.exists():
+        raise RuntimeError(f"{label} not found: {path}")
+
+
+def _load_gui_module():
+    _require(NATIVE_UI_ROOT / "interactive_sam2_gui_ytvis.py", "native GUI")
+    _require(SAM2_ROOT / "sam2", "bundled SAM2 realtime source")
+    # The native UI is a normal Python module. Its module-global SAM2_ROOT is
+    # deliberately replaced below, so models are loaded from this project.
+    for item in (str(NATIVE_UI_ROOT), str(SAM2_ROOT.parent), str(SAM2_ROOT)):
+        if item not in sys.path:
+            sys.path.insert(0, item)
+    import interactive_sam2_gui_ytvis as gui  # type: ignore
+
+    gui.SAM2_ROOT = str(SAM2_ROOT)
+    # The bundled realtime predictor is imported as ``sam2_realtime.sam2``.
+    for item in reversed((str(SAM2_ROOT.parent), str(SAM2_ROOT))):
+        if item in sys.path:
+            sys.path.remove(item)
+        sys.path.insert(0, item)
+    return gui
+
+
+def _make_lineage_gui_class(gui):
+    """Attach project-specific lineage persistence to hograph's native UI."""
+
+    class LineageInteractiveSam2Gui(gui.InteractiveSam2Gui):
+        def __init__(self, args) -> None:
+            self.lineage = _LineageRecorder()
+            super().__init__(args)
+
+        def _delete_object_by_id(self, obj_id: int) -> None:
+            track_id = int(obj_id)
+            is_object = self._kind_for_track(track_id) == "object"
+            # ``d`` is the explicit annotation boundary used to distinguish a
+            # true structural disappearance from ordinary tracker occlusion.
+            if is_object:
+                self.lineage.end_predecessor(track_id, int(self.frame_idx))
+            super()._delete_object_by_id(track_id)
+            if is_object:
+                self.lineage.mark_successor_deleted(track_id)
+
+        def _create_new_active_object(self, kind: str = "object") -> int:
+            created_id = int(super()._create_new_active_object(kind=kind))
+            if str(kind) != "hand":
+                self.lineage.add_child(created_id, int(self.frame_idx))
+            return created_id
+
+        def _set_active_object_by_id(self, target_id, *, create_if_missing=True, kind=None) -> bool:
+            track_id = int(target_id)
+            known_before = track_id in self._used_track_ids()
+            ok = bool(
+                super()._set_active_object_by_id(
+                    track_id,
+                    create_if_missing=create_if_missing,
+                    kind=kind,
+                )
+            )
+            if ok and not known_before and create_if_missing and self._kind_for_track(track_id) == "object":
+                self.lineage.add_child(track_id, int(self.frame_idx))
+            return ok
+
+        def _rename_active_object(self, new_id: int) -> None:
+            old_id = self.active_obj_id
+            super()._rename_active_object(int(new_id))
+            if old_id is not None and self.active_obj_id == int(new_id):
+                self.lineage.rename_id(int(old_id), int(new_id))
+
+        def _print_lineage(self) -> None:
+            if not self.lineage.relations:
+                print("[Lineage] No confirmed automatic relations.")
+                return
+            for relation in self.lineage.relations:
+                print(
+                    f"[Lineage] {relation['relation_id']}: "
+                    f"{relation['predecessor_ids']} -> {relation['successor_ids']} "
+                    f"({relation['type']}, {relation['status']})"
+                )
+
+        def _handle_key(self, key: int) -> bool:
+            if int(key & 0xFF) == ord("l"):
+                self._print_lineage()
+                return False
+            return bool(super()._handle_key(key))
+
+        def _save_outputs(self, *, force: bool = False) -> None:
+            super()._save_outputs(force=force)
+            output_dir = Path(self.output_dir)
+            relation_path = output_dir / "lineage_relations.json"
+            temporary = relation_path.with_suffix(".json.tmp")
+            with temporary.open("w", encoding="utf-8") as handle:
+                json.dump(self.lineage.payload(), handle, ensure_ascii=False, indent=2)
+            temporary.replace(relation_path)
+
+            session_path = output_dir / str(self.args.session_meta_out)
+            try:
+                with session_path.open("r", encoding="utf-8") as handle:
+                    session = json.load(handle)
+                session["lineage_relations"] = str(relation_path.resolve())
+                session["auto_relation_count"] = len(self.lineage.relations)
+                temporary_session = session_path.with_suffix(".json.tmp")
+                with temporary_session.open("w", encoding="utf-8") as handle:
+                    json.dump(session, handle, ensure_ascii=False, indent=2)
+                temporary_session.replace(session_path)
+            except Exception as exc:
+                print(f"[Lineage] Session metadata update skipped: {exc}")
+
+            print(f"[Lineage] Saved relations: {relation_path} ({len(self.lineage.relations)} confirmed)")
+
+    return LineageInteractiveSam2Gui
+
+
+def _outputs_for(input_path: Path, output_root: Path) -> tuple[Path, str, str]:
+    stem = input_path.stem if input_path.is_file() else input_path.name
+    out_dir = output_root / stem
+    return out_dir, "annotations_ytvis.json", "interactive_session_meta.json"
+
+
+def _make_args(gui, input_path: Path, options: argparse.Namespace):
+    output_dir, ytvis_out, session_meta_out = _outputs_for(input_path, Path(options.output_dir))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    return gui.AppArgs(
+        input=str(input_path.resolve()),
+        output_dir=str(output_dir),
+        ytvis_out=ytvis_out,
+        session_meta_out=session_meta_out,
+        video_id=int(options.video_id),
+        category_id=int(options.category_id),
+        hand_category_id=int(options.hand_category_id),
+        max_frames=options.max_frames,
+        start_id=int(options.start_id),
+        hand_start_id=int(options.hand_start_id),
+        brush_radius=int(options.brush_radius),
+        window_width=int(options.window_width),
+        autoplay=bool(options.autoplay),
+        play_fps=options.play_fps,
+        state_window=int(options.state_window),
+        gc_every=int(options.gc_every),
+        device=options.device,
+        offload_video_to_cpu=bool(options.offload_video_to_cpu),
+        offload_state_to_cpu=bool(options.offload_state_to_cpu),
+        sam2_checkpoint=options.checkpoint,
+        sam2_model_cfg=options.config,
+    )
+
+
+def _pick_native_file() -> str | None:
+    """Open an OS file picker when the Python desktop has a display."""
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        selected = filedialog.askopenfilename(
+            title="Select a video or image for SAM2 annotation",
+            filetypes=[
+                ("Media", "*.mp4 *.avi *.mov *.mkv *.webm *.mpeg *.mpg *.m4v *.jpg *.jpeg *.png *.bmp"),
+                ("All files", "*.*"),
+            ],
+        )
+        root.destroy()
+        return selected or None
+    except Exception as exc:
+        print(f"[Launcher] Native file picker unavailable: {exc}")
+        return None
+
+
+def _run_picker(gui, args_list: Iterable, output_root: Path) -> None:
+    items: List = list(args_list)
+    if not items:
+        print("[Launcher] No supported video/image/frame-directory found.")
+        return
+    selected = 0
+    while True:
+        picker = gui.SequencePickerGui(items, start_index=selected)
+        choice = picker.run()
+        if choice is None:
+            return
+        selected = int(choice)
+        item = items[selected]
+        print(f"[Launcher] Open: {item.input}")
+        gui.LineageInteractiveSam2Gui(item).run()
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Native OpenCV SAM2 realtime video mask annotator",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+    )
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--input", type=Path, help="One video, image, or frame directory")
+    group.add_argument("--dataset", type=Path, help="Folder of videos/frame-directories; opens a TODO/DONE picker")
+    parser.add_argument("--pick", action="store_true", help="Open the operating system file picker")
+    parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "outputs", help="Annotation output root")
+    parser.add_argument("--checkpoint", default="checkpoints/sam2.1_hiera_large.pt")
+    parser.add_argument("--config", default="configs/sam2.1/sam2.1_hiera_l.yaml")
+    parser.add_argument("--device", default="cuda")
+    parser.add_argument("--video-id", type=int, default=1)
+    parser.add_argument("--category-id", type=int, default=1)
+    parser.add_argument("--hand-category-id", type=int, default=0)
+    parser.add_argument("--start-id", type=int, default=100)
+    parser.add_argument("--hand-start-id", type=int, default=0)
+    parser.add_argument("--brush-radius", type=int, default=8)
+    parser.add_argument("--window-width", type=int, default=1440)
+    parser.add_argument("--max-frames", type=int)
+    parser.add_argument("--autoplay", action="store_true")
+    parser.add_argument("--play-fps", type=float)
+    parser.add_argument("--state-window", type=int, default=0, help="0 keeps full streaming state")
+    parser.add_argument("--gc-every", type=int, default=0)
+    parser.add_argument("--offload-video-to-cpu", action="store_true")
+    parser.add_argument("--offload-state-to-cpu", action="store_true")
+    return parser.parse_args()
+
+
+def main() -> None:
+    options = parse_args()
+    if options.pick:
+        picked = _pick_native_file()
+        if picked:
+            options.input = Path(picked)
+    if options.input is None and options.dataset is None:
+        raise SystemExit("Use --pick, --input PATH, or --dataset FOLDER. See --help.")
+
+    gui = _load_gui_module()
+    gui.LineageInteractiveSam2Gui = _make_lineage_gui_class(gui)
+    Path(options.output_dir).mkdir(parents=True, exist_ok=True)
+    if options.dataset is not None:
+        base = options.dataset.expanduser().resolve()
+        if not base.is_dir():
+            raise SystemExit(f"Dataset folder not found: {base}")
+        args_list = [_make_args(gui, Path(path), options) for path, _ in gui._discover_inputs(str(base))]
+        _run_picker(gui, args_list, Path(options.output_dir))
+        return
+
+    input_path = options.input.expanduser().resolve()
+    if not input_path.exists():
+        raise SystemExit(f"Input not found: {input_path}")
+    gui.LineageInteractiveSam2Gui(_make_args(gui, input_path, options)).run()
+
+
+if __name__ == "__main__":
+    main()

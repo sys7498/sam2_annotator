@@ -1,0 +1,9 @@
+name: sam2-annotator
+channels:
+  - defaults
+dependencies:
+  - python=3.11
+  - pip
+
+# CUDA-specific PyTorch is installed by scripts/setup_wsl_a6000.sh. Python 3.11
+# and the cu121 wheel are the conservative, tested choice for RTX A6000 WSL.
