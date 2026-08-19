@@ -34,10 +34,9 @@ class _PendingPredecessor:
 class _LineageRecorder:
     """Conservative automatic lineage from an explicit ID lifecycle.
 
-    A raw tracking disappearance is not sufficient evidence for a separation:
-    it is also caused by occlusion or model loss.  We therefore only create an
-    automatic relation after the annotator explicitly ends an object ID and
-    creates two new object IDs at the same transition.
+    A raw tracking disappearance is not sufficient evidence for a structural
+    event: it is also caused by occlusion or model loss. We therefore infer a
+    relation only from the annotator's explicit ID lifecycle at one transition.
     """
 
     pending: List[_PendingPredecessor] = field(default_factory=list)
@@ -64,40 +63,82 @@ class _LineageRecorder:
 
     def _try_create_relation(self, frame_idx: int) -> None:
         candidates = self._valid_pending(int(frame_idx))
-        # Two distinct parents ending together is ambiguous; do not guess.
-        if len(candidates) != 1:
+        if not candidates:
             return
-        parent = candidates[0]
         children = sorted(
             {
                 child_id
                 for child_id, child_frame in self.recent_children
-                if abs(int(child_frame) - int(parent.frame_idx)) <= self.transition_window
-                and int(child_id) != int(parent.track_id)
+                if any(
+                    abs(int(child_frame) - int(parent.frame_idx)) <= self.transition_window
+                    and int(child_id) != int(parent.track_id)
+                    for parent in candidates
+                )
             }
         )
-        if len(children) != 2:
+        if len(candidates) == 1 and len(children) == 2:
+            self._record_relation(
+                relation_type="separation",
+                parents=candidates,
+                children=children,
+                frame_idx=int(frame_idx),
+            )
             return
+        if len(candidates) != 2:
+            return
+        shared_children = [
+            child_id
+            for child_id in children
+            if all(
+                any(
+                    existing_id == child_id
+                    and abs(int(child_frame) - int(parent.frame_idx)) <= self.transition_window
+                    for existing_id, child_frame in self.recent_children
+                )
+                for parent in candidates
+            )
+        ]
+        if len(shared_children) == 1:
+            self._record_relation(
+                relation_type="joining",
+                parents=candidates,
+                children=shared_children,
+                frame_idx=int(frame_idx),
+            )
+
+    def _record_relation(
+        self,
+        *,
+        relation_type: str,
+        parents: List[_PendingPredecessor],
+        children: List[int],
+        frame_idx: int,
+    ) -> None:
+        parent_ids = sorted(int(parent.track_id) for parent in parents)
+        child_ids = sorted(int(child) for child in children)
         relation = {
-            "relation_id": f"auto-separation-{len(self.relations) + 1:04d}",
-            "type": "separation",
-            "predecessor_ids": [int(parent.track_id)],
-            "successor_ids": [int(children[0]), int(children[1])],
-            "frame_idx": int(max(frame_idx, parent.frame_idx)),
-            "predecessor_last_visible_frame": int(parent.last_visible_frame),
+            "relation_id": f"auto-{relation_type}-{len(self.relations) + 1:04d}",
+            "type": str(relation_type),
+            "predecessor_ids": parent_ids,
+            "successor_ids": child_ids,
+            "frame_idx": int(max([frame_idx] + [parent.frame_idx for parent in parents])),
+            "predecessor_last_visible_frames": {
+                str(parent.track_id): int(parent.last_visible_frame) for parent in parents
+            },
             "source": "auto_id_lifecycle",
             "status": "auto",
         }
         self.relations.append(relation)
-        self.pending.remove(parent)
+        for parent in parents:
+            self.pending.remove(parent)
         self.recent_children = [
             (child_id, child_frame)
             for child_id, child_frame in self.recent_children
-            if child_id not in set(children)
+            if child_id not in set(child_ids)
         ]
         print(
-            "[Lineage] Auto separation: "
-            f"predecessor {parent.track_id} -> successors {children[0]}, {children[1]} "
+            f"[Lineage] Auto {relation_type}: "
+            f"predecessors {parent_ids} -> successors {child_ids} "
             f"at frame {relation['frame_idx'] + 1}"
         )
 
@@ -130,7 +171,10 @@ class _LineageRecorder:
         return {
             "schema_version": "1.0",
             "relation_direction": "predecessor_to_successor",
-            "auto_rule": "explicit parent ID deletion plus exactly two new object IDs within 12 frames",
+            "auto_rule": {
+                "separation": "one explicit object-ID deletion plus exactly two new object IDs within 12 frames",
+                "joining": "two explicit object-ID deletions plus exactly one new object ID within 12 frames",
+            },
             "relations": self.relations,
             "pending_predecessors": [
                 {

@@ -63,8 +63,8 @@ frame 상태를 정리하므로 과거 frame에서 수정하면 해당 frame까�
 2. 왼쪽 클릭은 positive point이고, 드래그는 box prompt다. 오른쪽 클릭은 negative point다.
    `Shift`를 함께 누르면 hand ID를 대상으로 한다.
 3. `n`은 새 object ID, `h`는 새 hand ID, `[`/`]`는 ID 선택, `d`는 삭제, `c`는 ID 변경이다.
-   부모 object ID를 `d`로 종료한 뒤 전환 구간에서 object ID를 정확히 두 개 만들면
-   `1→2 separation` predecessor–successor 관계가 자동 생성된다. `l`로 관계를 터미널에
+   한 ID를 종료하고 두 ID를 만들면 `1→2 separation`, 두 ID를 종료하고 한 ID를 만들면
+   `2→1 joining` predecessor–successor 관계가 자동 생성된다. `l`로 관계를 터미널에
    확인할 수 있고, `lineage_relations.json`에 저장된다. 가림/추적 실패는 관계로 오인하지
    않도록, ID를 명시적으로 종료한 경우에만 자동 생성한다.
 4. `Space` 또는 `.`은 한 frame 전진하며 SAM2가 현재 ID를 다음 frame으로 전파한다.

@@ -110,19 +110,23 @@ audio는 추출하지 않는다. 중단된 작업은 완성된 `rgb/` 폴더를 
 | `o` | 현재 프레임의 outline PNG 저장 |
 | `q`, `Esc` | 저장 후 종료 |
 
-## 5. 객체가 둘로 분리되는 경우
+## 5. 구조 변화 관계 자동 기록
 
 가림이나 일시적 tracking 실패와 실제 분리를 구분하기 위해, relation은 ID lifecycle을 명시적으로
 표시했을 때만 자동 기록된다.
 
-1. 분리 직전 부모 object ID를 활성화한다.
-2. 분리가 시작되는 프레임에서 `d`로 부모 ID를 종료한다.
-3. 같은 전환 구간에서 `n`을 두 번 눌러 successor object ID 두 개를 만든다.
-4. 각 successor에 점 또는 box prompt를 준다.
+분리와 결합은 별도 relation 입력 창 없이 평소 ID lifecycle을 따라 자동 기록된다.
 
-그러면 `lineage_relations.json`에 `type: "separation"`, `predecessor_ids: [부모]`,
-`successor_ids: [자식1, 자식2]`가 기록된다. 생성 뒤 successor를 삭제하면 해당 relation은
-`needs_review`가 되므로 확인 후 다시 지정한다. `l`로 현재 relation을 터미널에서 확인한다.
+| 변화 | 마스크 작업 | 자동 relation |
+| --- | --- | --- |
+| 하나가 둘로 분리 | 부모 ID 하나를 `d`로 종료 → `n`으로 새 object ID 두 개 생성 → 각 ID에 prompt | `separation`: `1→2` |
+| 둘이 하나로 결합 | 부모 ID 두 개를 `d`에서 쉼표로 함께 종료 → `n`으로 새 object ID 하나 생성 → prompt | `joining`: `2→1` |
+
+새 ID는 부모 ID 종료 시점 전후 12프레임 안에서 생성돼야 한다. 그러면
+`lineage_relations.json`에 predecessor IDs, successor IDs, transition frame과 `type`이 기록된다.
+생성 뒤 successor를 삭제하면 해당 relation은 `needs_review`가 되므로 확인 후 다시 지정한다.
+`l`로 현재 relation을 터미널에서 확인한다. 가림이나 tracking 실패에는 `d`를 누르지 않으면
+relation이 생성되지 않는다.
 
 ## 6. 저장 결과
 
@@ -139,7 +143,7 @@ outputs/<입력_이름>/
 
 - `annotations_ytvis.json`: track ID별 COCO-style uncompressed RLE mask, bbox, area
 - `interactive_session_meta.json`: 처리한 프레임, 영상 입력과 결과 파일 위치
-- `lineage_relations.json`: 자동 생성된 separation predecessor–successor 관계 및 검수 상태
+- `lineage_relations.json`: 자동 생성된 separation/joining predecessor–successor 관계 및 검수 상태
 
 ## 7. WSL 문제 해결
 
