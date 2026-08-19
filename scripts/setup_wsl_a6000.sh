@@ -28,7 +28,7 @@ nvidia-smi --query-gpu=name,driver_version --format=csv,noheader
 if command -v sudo >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
   echo "== Installing OpenCV runtime libraries =="
   sudo apt-get update
-  sudo apt-get install -y libgl1 libglib2.0-0
+  sudo apt-get install -y libgl1 libglib2.0-0 ffmpeg
 fi
 
 if ! conda env list | awk '{print $1}' | grep -qx "$ENV_NAME"; then

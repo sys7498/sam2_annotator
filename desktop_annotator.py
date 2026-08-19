@@ -20,6 +20,7 @@ from typing import Any, Iterable, List
 PROJECT_ROOT = Path(__file__).resolve().parent
 NATIVE_UI_ROOT = PROJECT_ROOT / "native_ui"
 SAM2_ROOT = PROJECT_ROOT / "vendor" / "sam2_realtime"
+VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".mpeg", ".mpg", ".m4v"}
 
 
 @dataclass
@@ -255,15 +256,30 @@ def _make_lineage_gui_class(gui):
     return LineageInteractiveSam2Gui
 
 
-def _outputs_for(input_path: Path, output_root: Path) -> tuple[Path, str, str]:
-    stem = input_path.stem if input_path.is_file() else input_path.name
-    out_dir = output_root / stem
+def _outputs_for(
+    input_path: Path,
+    output_root: Path,
+    relative_input: Path | None = None,
+) -> tuple[Path, str, str]:
+    key = relative_input
+    if key is None:
+        key = Path(input_path.stem if input_path.is_file() else input_path.name)
+    key = key.with_suffix("") if key.suffix else key
+    out_dir = output_root.joinpath(*key.parts)
     return out_dir, "annotations_ytvis.json", "interactive_session_meta.json"
 
 
-def _make_args(gui, input_path: Path, options: argparse.Namespace):
-    output_dir, ytvis_out, session_meta_out = _outputs_for(input_path, Path(options.output_dir))
-    output_dir.mkdir(parents=True, exist_ok=True)
+def _make_args(
+    gui,
+    input_path: Path,
+    options: argparse.Namespace,
+    relative_input: Path | None = None,
+):
+    output_dir, ytvis_out, session_meta_out = _outputs_for(
+        input_path,
+        Path(options.output_dir),
+        relative_input,
+    )
     return gui.AppArgs(
         input=str(input_path.resolve()),
         output_dir=str(output_dir),
@@ -287,6 +303,34 @@ def _make_args(gui, input_path: Path, options: argparse.Namespace):
         sam2_checkpoint=options.checkpoint,
         sam2_model_cfg=options.config,
     )
+
+
+def _discover_dataset_inputs(gui, base_dir: Path) -> List[tuple[Path, Path]]:
+    """Find videos recursively and image-frame sequences without name collisions.
+
+    For example, ``raw/jdh/jdh_cups_join/rgb.mp4`` is returned with its
+    complete relative path. Its annotations therefore go under
+    ``outputs/jdh/jdh_cups_join/rgb/`` rather than colliding with another
+    participant's ``rgb.mp4``.
+    """
+    found: List[tuple[Path, Path]] = []
+    for root_text, dir_names, file_names in os.walk(base_dir):
+        root = Path(root_text)
+        dir_names[:] = sorted(name for name in dir_names if not name.startswith("."))
+        visible_files = sorted(name for name in file_names if not name.startswith("."))
+        for name in visible_files:
+            path = root / name
+            if path.suffix.lower() in VIDEO_EXTENSIONS:
+                found.append((path, path.relative_to(base_dir)))
+
+        # A directory containing image files is one frame sequence. Do not
+        # also offer every individual image as a separate dataset item.
+        image_files = [name for name in visible_files if gui._is_image_file(name)]
+        if image_files:
+            found.append((root, root.relative_to(base_dir)))
+            dir_names[:] = []
+
+    return sorted(found, key=lambda item: str(item[1]).lower())
 
 
 def _pick_native_file() -> str | None:
@@ -336,7 +380,11 @@ def parse_args() -> argparse.Namespace:
     )
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--input", type=Path, help="One video, image, or frame directory")
-    group.add_argument("--dataset", type=Path, help="Folder of videos/frame-directories; opens a TODO/DONE picker")
+    group.add_argument(
+        "--dataset",
+        type=Path,
+        help="Folder searched recursively for videos/frame-directories; opens a TODO/DONE picker",
+    )
     parser.add_argument("--pick", action="store_true", help="Open the operating system file picker")
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "outputs", help="Annotation output root")
     parser.add_argument("--checkpoint", default="checkpoints/sam2.1_hiera_large.pt")
@@ -370,12 +418,14 @@ def main() -> None:
 
     gui = _load_gui_module()
     gui.LineageInteractiveSam2Gui = _make_lineage_gui_class(gui)
-    Path(options.output_dir).mkdir(parents=True, exist_ok=True)
     if options.dataset is not None:
         base = options.dataset.expanduser().resolve()
         if not base.is_dir():
             raise SystemExit(f"Dataset folder not found: {base}")
-        args_list = [_make_args(gui, Path(path), options) for path, _ in gui._discover_inputs(str(base))]
+        args_list = [
+            _make_args(gui, input_path, options, relative_input)
+            for input_path, relative_input in _discover_dataset_inputs(gui, base)
+        ]
         _run_picker(gui, args_list, Path(options.output_dir))
         return
 

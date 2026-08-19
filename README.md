@@ -29,6 +29,12 @@ Codex 또는 Claude Code에 환경 구성을 맡길 때는
 전체 조작법, 모든 단축키, 자동 separation relation과 WSL 문제 해결은
 [USAGE_KO.md](USAGE_KO.md)에 정리했다.
 
+Aria raw recordings를 사람별 5fps MP4로 만들려면 다음을 사용한다.
+
+```bash
+bash scripts/sample_aria_recording_5fps.sh <사람_폴더명>
+```
+
 ## 실행
 
 ```bash

@@ -28,6 +28,35 @@ python desktop_annotator.py --dataset /mnt/c/path/to/videos
 지원 입력은 MP4, AVI, MOV, MKV, WebM, MPEG 계열 영상과 이미지 또는 frame 이미지 폴더다.
 결과는 입력과 분리되어 `outputs/<입력_이름>/` 아래에 저장된다.
 
+`--dataset`은 하위 폴더를 재귀적으로 탐색한다. 따라서
+`raw/<사람>/<작업>/rgb.mp4`처럼 중간 폴더가 추가돼도 자동으로 찾고,
+결과도 `outputs/<사람>/<작업>/rgb/`로 분리되어 같은 `rgb.mp4` 파일명이 충돌하지 않는다.
+
+## Aria raw 영상 5fps 샘플링
+
+사람 폴더 하나의 MP4를 재귀적으로 찾아 5fps 영상으로 만든다. 원본의 중간 폴더 구조를 보존한다.
+
+```bash
+# 먼저 어떤 파일이 처리될지 확인
+bash scripts/sample_aria_recording_5fps.sh jdh --dry-run
+
+# raw/jdh/**/rgb.mp4 → 5fps_sampled/jdh/**/rgb.mp4
+bash scripts/sample_aria_recording_5fps.sh jdh
+
+# 이미 만든 파일도 다시 생성
+bash scripts/sample_aria_recording_5fps.sh jdh --overwrite
+```
+
+기본 경로는 `/workspace/shared/aria_recording/`이며, 다른 위치에서는 아래처럼 지정한다.
+
+```bash
+ARIA_RECORDING_ROOT=/다른/aria_recording \
+  bash scripts/sample_aria_recording_5fps.sh jdh
+```
+
+macOS metadata 파일(`._rgb.mp4`)은 자동으로 건너뛴다. 샘플 영상은 annotation 용도이므로
+audio를 포함하지 않는다.
+
 ## 2. 기본 작업 흐름
 
 1. 첫 프레임에서 `n`으로 새 object ID를 만든다.
