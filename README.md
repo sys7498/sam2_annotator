@@ -66,7 +66,7 @@ rate(5 fps)에 맞춰 제출 전 sampling pass를 수행한다.
 
 ## 배포 구성
 
-- `native_ui/`: 외부 hograph checkout 없이 실행하도록 포함한 native OpenCV UI
+- `native_ui/`: 프로젝트에 포함된 native OpenCV UI
 - `vendor/sam2_realtime/`: Apache-2.0 SAM2 realtime source (checkpoint 제외)
 - `scripts/setup_wsl_a6000.sh`: A6000 WSL 단일 설치 명령
 - `scripts/verify_a6000.py`: CUDA/OpenCV/SAM2 모델 로드 확인

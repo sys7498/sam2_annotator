@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
 """Native OpenCV launcher for the SAM2 realtime mask annotator.
 
-This deliberately reuses the battle-tested interactive UI from hograph, now
-included in ``native_ui/``, and uses the self-contained SAM2 checkout.
+This uses the included native OpenCV UI and self-contained SAM2 checkout.
 There is no HTTP, JSON image transport, or browser-side mask compositing in
 this path: the window receives frames directly from OpenCV.
 """
@@ -168,7 +167,7 @@ def _load_gui_module():
 
 
 def _make_lineage_gui_class(gui):
-    """Attach project-specific lineage persistence to hograph's native UI."""
+    """Attach project-specific lineage persistence to the native UI."""
 
     class LineageInteractiveSam2Gui(gui.InteractiveSam2Gui):
         def __init__(self, args) -> None:

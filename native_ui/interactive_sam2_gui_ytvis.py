@@ -1812,75 +1812,8 @@ class InteractiveSam2Gui:
         print(f"[GUI] Saved session metadata: {session_path}")
 
 
-def _build_hardcoded_args_list() -> List[AppArgs]:
-    # ------------------------------------------------------------------
-    # Hardcoded run config (edit here)
-    # ------------------------------------------------------------------
-    root_dir = "/home/development/hograph/paper/images/qualitative"
-    participant_name = "split"
-    base_dir = os.path.join(root_dir, participant_name)
-    save_dir = os.path.join(root_dir, "background_removed")
-    ensure_dir(save_dir)
-    discovered = _discover_inputs(base_dir)
-    args_list: List[AppArgs] = []
-    for input_path, obj_name in discovered:
-        ytvis_out = f"{obj_name}_annotations_ytvis.json"
-        session_meta_out = f"{obj_name}_interactive_session_meta.json"
-        args_list.append(
-            AppArgs(
-                input=input_path,
-                output_dir=save_dir,
-                ytvis_out=ytvis_out,
-                session_meta_out=session_meta_out,
-                video_id=1,
-                category_id=1,
-                hand_category_id=0,
-                max_frames=None,
-                start_id=100,
-                hand_start_id=0,
-                brush_radius=8,
-                window_width=1080,
-                autoplay=False,
-                play_fps=None,
-                state_window=0,
-                gc_every=0,
-                device=None,
-                offload_video_to_cpu=False,
-                offload_state_to_cpu=False,
-                sam2_checkpoint="checkpoints/sam2.1_hiera_large.pt",
-                sam2_model_cfg="configs/sam2.1/sam2.1_hiera_l.yaml",
-            )
-        )
-
-    print(f"[GUI] participant={participant_name}")
-    print(f"[GUI] base_dir: {base_dir}")
-    print(f"[GUI] discovered_inputs: {len(args_list)}")
-    for i, a in enumerate(args_list, start=1):
-        print(
-            f"[GUI] [{i}/{len(args_list)}] input={a.input} "
-            f"-> {os.path.join(a.output_dir, a.ytvis_out)}"
-        )
-    return args_list
-
-
 def main() -> None:
-    args_list = _build_hardcoded_args_list()
-    if not args_list:
-        raise RuntimeError("No annotatable inputs found under participant directory.")
-    picker_index = 0
-    while True:
-        picker = SequencePickerGui(args_list, start_index=picker_index)
-        picked = picker.run()
-        if picked is None:
-            print("[GUI] Exit sequence picker.")
-            break
-        picker_index = int(picked)
-        args = args_list[int(picked)]
-        print("=" * 72)
-        print(f"[GUI] START {int(picked) + 1}/{len(args_list)}: {args.input}")
-        app = InteractiveSam2Gui(args)
-        app.run()
-        print(f"[GUI] DONE  {int(picked) + 1}/{len(args_list)}: {args.input}")
+    raise SystemExit("Use the project launcher: python desktop_annotator.py --pick")
 
 
 if __name__ == "__main__":
