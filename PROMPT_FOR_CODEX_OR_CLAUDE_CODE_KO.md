@@ -10,7 +10,7 @@
 2. 저장소 루트에서 `bash scripts/setup_wsl_a6000.sh`를 실행한다.
    - Conda 환경 이름은 반드시 `sam2-annotator`를 사용한다.
    - CUDA는 A6000 호환 PyTorch cu121 wheel을 사용한다.
-   - 스크립트가 Meta 공개 SAM2.1 large checkpoint를 다운로드하고 SHA-256 검증까지 완료해야 한다.
+   - 스크립트가 Meta 공개 SAM2.1 small checkpoint를 다운로드하고 SHA-256 검증까지 완료해야 한다.
 3. `conda run -n sam2-annotator python scripts/verify_a6000.py`가 A6000 GPU와
    `SAM2RealtimePredictor loaded successfully`를 출력하는지 확인한다.
 4. WSLg GUI가 가능한 환경이면 `python desktop_annotator.py --pick`을 실행해 OpenCV 창과

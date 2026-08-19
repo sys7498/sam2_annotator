@@ -20,7 +20,9 @@ python desktop_annotator.py --pick
 ```
 
 설치 스크립트는 A6000 호환 PyTorch 2.5.1/cu121, Python 의존성, OpenCV 런타임 라이브러리와
-Meta 공개 SAM2.1 large checkpoint(약 0.9GB)를 설치하고 GPU 모델 로딩을 검증한다. 모델
+Meta 공개 SAM2.1 small checkpoint(약 176MB)를 설치하고 GPU 모델 로딩을 검증한다. small은
+속도와 video-mask 품질의 기본 균형 모델이며, 필요하면 실행 시 `--checkpoint`와 `--config`로
+large 등 다른 SAM2.1 모델을 지정할 수 있다. 모델
 checkpoint와 작업 영상/결과는 Git에 포함하지 않는다.
 
 Codex 또는 Claude Code에 환경 구성을 맡길 때는

@@ -5,9 +5,9 @@ set -euo pipefail
 PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ENV_NAME="sam2-annotator"
 CHECKPOINT_DIR="$PROJECT_ROOT/vendor/sam2_realtime/checkpoints"
-CHECKPOINT_PATH="$CHECKPOINT_DIR/sam2.1_hiera_large.pt"
-CHECKPOINT_URL="https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_large.pt"
-CHECKPOINT_SHA256="2647878d5dfa5098f2f8649825738a9345572bae2d4350a2468587ece47dd318"
+CHECKPOINT_PATH="$CHECKPOINT_DIR/sam2.1_hiera_small.pt"
+CHECKPOINT_URL="https://dl.fbaipublicfiles.com/segment_anything_2/092824/sam2.1_hiera_small.pt"
+CHECKPOINT_SHA256="6d1aa6f30de5c92224f8172114de081d104bbd23dd9dc5c58996f0cad5dc4d38"
 
 if ! command -v conda >/dev/null 2>&1; then
   echo "Conda was not found. Install Miniconda in WSL first, then rerun this script." >&2
@@ -53,7 +53,7 @@ fi
 
 mkdir -p "$CHECKPOINT_DIR"
 if [[ ! -f "$CHECKPOINT_PATH" ]]; then
-  echo "== Downloading SAM2.1 large checkpoint (about 0.9 GB) =="
+  echo "== Downloading SAM2.1 small checkpoint (about 176 MB) =="
   curl -fL --retry 3 --retry-delay 2 -o "$CHECKPOINT_PATH" "$CHECKPOINT_URL"
 fi
 echo "$CHECKPOINT_SHA256  $CHECKPOINT_PATH" | sha256sum -c -

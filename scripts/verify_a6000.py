@@ -9,7 +9,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 VENDOR = ROOT / "vendor" / "sam2_realtime"
-CHECKPOINT = VENDOR / "checkpoints" / "sam2.1_hiera_large.pt"
+CHECKPOINT = VENDOR / "checkpoints" / "sam2.1_hiera_small.pt"
 
 for path in (ROOT, VENDOR.parent, VENDOR):
     if str(path) not in sys.path:
@@ -35,7 +35,7 @@ def main() -> None:
     from sam2_realtime.sam2.build_sam import build_sam2_realtime_predictor
 
     predictor = build_sam2_realtime_predictor(
-        "configs/sam2.1/sam2.1_hiera_l.yaml",
+        "configs/sam2.1/sam2.1_hiera_s.yaml",
         str(CHECKPOINT),
         device="cuda",
     )
