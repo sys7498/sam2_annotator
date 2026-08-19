@@ -74,8 +74,10 @@ frame 상태를 정리하므로 과거 frame에서 수정하면 해당 frame까�
 4. `Space` 또는 `.`은 한 frame 전진하며 SAM2가 현재 ID를 다음 frame으로 전파한다. `,`는
    이전 frame으로 이동한다. 과거 frame에서 mask를 수정한 뒤 `Space`를 누르면 그 지점 이후만
    앞으로 다시 전파한다.
-   `e`는 ID를 입력해 positive/negative prompt를 추가·삭제하는 mask 편집기이고, `b`는
-   brush 보정, `a`는 brush 보정 mask 적용, `s`는 저장이다.
+   `e`는 수정할 ID만 입력한 뒤 영상 위에서 직접 mask를 보정하는 모드다. 이 모드에서
+   좌클릭은 positive, 우클릭은 negative prompt이며 `e`를 한 번 더 누르면 종료한다. `p`는
+   좌표를 직접 입력해야 할 때 쓰는 터미널 prompt 편집기다. `b`는 brush 보정, `a`는 brush
+   보정 mask 적용, `s`는 저장이다.
 
 출력 JSON은 COCO-style uncompressed RLE를 포함한다. 연구 데이터의 target annotation
 rate(5 fps)에 맞춰 제출 전 sampling pass를 수행한다.

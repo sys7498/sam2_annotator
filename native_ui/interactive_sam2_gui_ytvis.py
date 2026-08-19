@@ -621,6 +621,11 @@ class InteractiveSam2Gui:
         self.source_px_per_display_px = float(self.frame_w) / float(self.window_width)
 
         self.prompt_states: Dict[int, PromptState] = {}
+        # `e` selects an existing ID, then turns the video canvas into a
+        # point-prompt editor for that exact ID.  Keep this separate from the
+        # free click/box workflow and the brush-mask workflow.
+        self.prompt_edit_mode = False
+        self.prompt_edit_obj_id: Optional[int] = None
         self.edit_mode = False
         self.edit_mask: Optional[np.ndarray] = None
         self.brush_radius = self._display_distance(float(max(1, args.brush_radius)))
@@ -1089,10 +1094,15 @@ class InteractiveSam2Gui:
             print("[GUI] unknown cmd. use '+ x y', '- x y', del+ N, del- N, list, clear, apply, status, q")
 
     def _prompt_edit_track_prompts(self) -> None:
-        """Select an existing ID, then edit its positive/negative prompts."""
+        """Select an existing ID, then edit that mask with mouse prompts."""
+        if self.prompt_edit_mode:
+            self.prompt_edit_mode = False
+            self.prompt_edit_obj_id = None
+            print("[GUI] Mouse prompt edit closed.")
+            return
         self._print_status()
         try:
-            raw = input("[GUI] Edit mask for track ID (empty=cancel): ").strip()
+            raw = input("[GUI] Mouse-edit mask for track ID (empty=cancel): ").strip()
         except Exception as exc:
             print(f"[GUI] input failed: {exc}")
             return
@@ -1103,8 +1113,23 @@ class InteractiveSam2Gui:
         except Exception:
             print(f"[GUI] invalid id: {raw}")
             return
-        if self._set_active_object_by_id(track_id, create_if_missing=False):
-            self._prompt_edit_active_prompts()
+        if not self._set_active_object_by_id(track_id, create_if_missing=False):
+            return
+        if int(track_id) not in self.object_ids:
+            print(f"[GUI] ID {track_id} has no visible mask on this frame.")
+            return
+        self.edit_mode = False
+        self.edit_mask = None
+        self.paint_mode = 0
+        self.dragging_box = False
+        self.drag_start = None
+        self.drag_current = None
+        self.prompt_edit_mode = True
+        self.prompt_edit_obj_id = int(track_id)
+        print(
+            f"[GUI] Mouse prompt edit: ID {track_id}. "
+            "Left-click=positive, right-click=negative, e=finish."
+        )
 
     def _prompt_new_object_id(self) -> None:
         self._print_status()
@@ -1193,6 +1218,8 @@ class InteractiveSam2Gui:
         self.current_masks = self.track_store.masks_at_frame(self.frame_idx)
         self.object_ids = sorted(self.current_masks)
         self.prompt_states.clear()
+        self.prompt_edit_mode = False
+        self.prompt_edit_obj_id = None
         self.edit_mode = False
         self.edit_mask = None
         self.playing = False
@@ -1203,6 +1230,8 @@ class InteractiveSam2Gui:
         return True
 
     def _step_forward(self) -> bool:
+        self.prompt_edit_mode = False
+        self.prompt_edit_obj_id = None
         self._prepare_history_for_forward_tracking()
         step_start = time.perf_counter()
         next_item = self.frame_source.read_next()
@@ -1396,6 +1425,9 @@ class InteractiveSam2Gui:
             self.object_ids = [x for x in self.object_ids if int(x) != obj_id]
         self.current_masks.pop(obj_id, None)
         self.prompt_states.pop(obj_id, None)
+        if self.prompt_edit_obj_id == obj_id:
+            self.prompt_edit_mode = False
+            self.prompt_edit_obj_id = None
         self.track_kind_by_id.pop(int(obj_id), None)
         if self.active_id_by_kind.get(obj_kind) == int(obj_id):
             self.active_id_by_kind[obj_kind] = None
@@ -1503,6 +1535,8 @@ class InteractiveSam2Gui:
             print(f"[GUI] Track store rename warning: {msg}")
         if old_id in self.prompt_states:
             self.prompt_states[new_id] = self.prompt_states.pop(old_id)
+        if self.prompt_edit_obj_id == old_id:
+            self.prompt_edit_obj_id = int(new_id)
         self.track_kind_by_id.pop(int(old_id), None)
         self._register_track_kind(int(new_id), old_kind)
         self.active_id_by_kind[old_kind] = int(new_id)
@@ -1663,6 +1697,24 @@ class InteractiveSam2Gui:
                 self.paint_mode = 0
             return
 
+        if self.prompt_edit_mode:
+            target_id = self.prompt_edit_obj_id
+            if target_id is None or int(target_id) not in self.object_ids:
+                print("[GUI] Mouse prompt edit closed: no active ID.")
+                self.prompt_edit_mode = False
+                self.prompt_edit_obj_id = None
+                return
+            obj_id = int(target_id)
+            kind = self._kind_for_track(obj_id)
+            ps = self.prompt_states.setdefault(obj_id, PromptState())
+            if event == cv2.EVENT_LBUTTONDOWN:
+                ps.pos_points.append((int(x), int(y)))
+                self._run_click_update(obj_id, kind=kind)
+            elif event == cv2.EVENT_RBUTTONDOWN:
+                ps.neg_points.append((int(x), int(y)))
+                self._run_click_update(obj_id, kind=kind)
+            return
+
         if event == cv2.EVENT_LBUTTONDOWN:
             self.drag_prompt_kind = "hand" if bool(flags & int(cv2.EVENT_FLAG_SHIFTKEY)) else "object"
             self.dragging_box = True
@@ -1792,6 +1844,8 @@ class InteractiveSam2Gui:
             self._print_status()
             return False
         if key == ord("p"):
+            self.prompt_edit_mode = False
+            self.prompt_edit_obj_id = None
             self._prompt_edit_active_prompts()
             return False
 
@@ -1800,6 +1854,8 @@ class InteractiveSam2Gui:
             self._prompt_edit_track_prompts()
             return False
         if key == ord("b"):
+            self.prompt_edit_mode = False
+            self.prompt_edit_obj_id = None
             if self.edit_mode:
                 self._cancel_edit_mode()
             else:
@@ -1950,14 +2006,23 @@ class InteractiveSam2Gui:
             frame_text = f"{self.frame_idx + 1}/?"
         else:
             frame_text = f"{self.frame_idx + 1}/{self.total_frames}"
+        if self.edit_mode:
+            interaction_mode = "BRUSH"
+            mouse_help = "Brush: left add | right erase | b cancel | a apply"
+        elif self.prompt_edit_mode:
+            interaction_mode = "PROMPT"
+            mouse_help = "Prompt ID: left positive | right negative | e finish"
+        else:
+            interaction_mode = "CLICK"
+            mouse_help = "Mouse: left click/drag object | Shift + left click/drag hand | right click negative"
         lines = [
-            f"Frame {frame_text} | {'EDIT' if self.edit_mode else 'CLICK'} | active ID: {self.active_obj_id if self.active_obj_id is not None else '-'}",
+            f"Frame {frame_text} | {interaction_mode} | active ID: {self.active_obj_id if self.active_obj_id is not None else '-'}",
             (
                 f"Object: {self.active_id_by_kind.get('object')} | Hand: {self.active_id_by_kind.get('hand')} | "
                 f"next object: {self.next_obj_id} | next hand: {self.next_hand_id}"
             ),
-            "Mouse: left click/drag object | Shift + left click/drag hand | right click negative",
-            "Keys: Space/. next | , previous | n object | h hand | [ ] ID | e edit prompts | d delete | s save | q exit",
+            mouse_help,
+            "Keys: Space/. next | , previous | n object | h hand | [ ] ID | e mouse prompts | d delete | s save | q exit",
             "More: p active prompts | b brush edit | a apply brush | g select | c rename | t crop | o outline",
         ]
         y0 = self._display_distance(30.0)
