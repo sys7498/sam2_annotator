@@ -68,9 +68,9 @@ python desktop_annotator.py --dataset /path/to/videos
 `/workspace/shared/aria_recording/5fps_sampled_masks/<video_name>/annotations_ytvis.json`,
 `annotation_overlay.mp4`, `interactive_session_meta.json`, `lineage_relations.json`, `lineage_graph.png`에 저장된다.
 마지막 frame에서 `Space`를 한 번 더 누르거나 `q`/창 닫기로 작업을 끝내면 annotation overlay MP4가 자동 생성된다. 항상 가장 최근 결과가
-`annotations_ytvis.json`, `annotation_overlay.mp4` 기본 이름을 사용한다. 새 작업을 저장할 때 기존 결과는
-`annotations_ytvis_2.json`, `annotation_overlay_2.mp4`로 옮겨지고, 더 오래된 `_2`는 `_3`으로 밀린다.
-한 번 연 세션에서 `s`를 반복해도 현재 기본 이름의 파일만 갱신한다.
+`annotations_ytvis.json`, `annotation_overlay.mp4` 기본 이름을 사용한다. 새 작업을 저장할 때 기존 결과 묶음은
+`history/<저장시각>/`로 통째로 이동하며, 그 안에서도 파일명은 기본 이름을 유지한다. 한 번 연 세션에서 `s`를 반복해도
+현재 기본 이름의 파일만 갱신한다.
 `lineage_graph.png`는 ID별 mask 구간과 separation/joining 화살표를 한눈에 보여 주며, `s`로
 중간 저장하거나 창을 닫고 `q`로 종료할 때마다 갱신된다. Windows 쪽 영상은 WSL에서 `/mnt/c/...` 경로로
 지정하거나 `--pick`으로 선택할 수 있다.

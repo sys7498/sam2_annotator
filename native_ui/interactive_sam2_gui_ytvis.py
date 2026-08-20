@@ -734,15 +734,15 @@ class InteractiveSam2Gui:
             "lineage_relations.json",
             "lineage_graph.png",
         ]
-        # The current session always owns the unsuffixed names.  Existing
-        # result bundles are moved to _2, _3, ... only when this session first
-        # writes a non-empty annotation.
-        self.output_version = 1
+        # The current session always owns the unsuffixed names. Existing
+        # result bundles are moved intact into history/<timestamp>/ only when
+        # this session first writes a non-empty annotation.
         self.ytvis_out_path = os.path.join(self.output_dir, str(args.ytvis_out))
         self.session_meta_out_path = os.path.join(
             self.output_dir, str(getattr(args, "session_meta_out", "interactive_session_meta.json"))
         )
         self.annotation_video_out_path = os.path.join(self.output_dir, "annotation_overlay.mp4")
+        self.output_history_dir = os.path.join(self.output_dir, "history")
         self.output_archive_performed = False
         self.video_name = os.path.splitext(os.path.basename(os.path.abspath(args.input)))[0]
         self.transparent_crop_dir = os.path.join(self.output_dir, "transparent_crops", self.video_name)
@@ -755,7 +755,7 @@ class InteractiveSam2Gui:
         if self.has_prior_annotation:
             print(
                 "[GUI] Existing annotation detected. The current result will keep the base name; "
-                "older results will be archived as _2, _3, ... when saved."
+                "older results will be moved into history/ when saved."
             )
 
     @staticmethod
@@ -790,16 +790,33 @@ class InteractiveSam2Gui:
                     versions.add(int(match.group(1)))
         return sorted(versions)
 
+    def _new_history_dir(self, *, label: Optional[str] = None) -> str:
+        """Allocate an empty history directory without changing prior files."""
+        base = str(label or time.strftime("%Y%m%d_%H%M%S"))
+        candidate = os.path.join(self.output_history_dir, base)
+        suffix = 2
+        while os.path.exists(candidate):
+            candidate = os.path.join(self.output_history_dir, f"{base}_{suffix}")
+            suffix += 1
+        ensure_dir(candidate)
+        return candidate
+
     def _archive_prior_outputs(self) -> None:
-        """Shift existing results back so this session can use unsuffixed names."""
+        """Move prior result bundles into history/ so the newest names stay plain."""
         if self.output_archive_performed:
             return
-        for version in reversed(self._existing_output_versions()):
+        versions = self._existing_output_versions()
+        for version in versions:
+            # Version 1 is the old current result. Legacy suffixed files from
+            # earlier releases are retained in their own history folder too.
+            history_dir = self._new_history_dir(
+                label=None if int(version) == 1 else f"legacy_{int(version)}"
+            )
             for artifact_name in self.output_artifact_names:
                 source = os.path.join(self.output_dir, _add_output_version(artifact_name, version))
                 if not os.path.exists(source):
                     continue
-                target = os.path.join(self.output_dir, _add_output_version(artifact_name, version + 1))
+                target = os.path.join(history_dir, artifact_name)
                 os.replace(source, target)
         self.output_archive_performed = True
         self.existing_track_count = 0
