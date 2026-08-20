@@ -1172,6 +1172,17 @@ class InteractiveSam2Gui:
             f"future masks will be recomputed ({len(self.object_ids)} visible tracks)."
         )
 
+    def _exit_frame_edit_modes(self) -> None:
+        """Discard transient prompt/brush interaction when changing frames."""
+        self.prompt_edit_mode = False
+        self.prompt_edit_obj_id = None
+        self.edit_mode = False
+        self.edit_mask = None
+        self.paint_mode = 0
+        self.dragging_box = False
+        self.drag_start = None
+        self.drag_current = None
+
     def _step_backward(self) -> bool:
         target = int(self.frame_idx - 1)
         if target < 0:
@@ -1186,10 +1197,7 @@ class InteractiveSam2Gui:
         self.current_masks = self.track_store.masks_at_frame(self.frame_idx)
         self.object_ids = sorted(self.current_masks)
         self.prompt_states.clear()
-        self.prompt_edit_mode = False
-        self.prompt_edit_obj_id = None
-        self.edit_mode = False
-        self.edit_mask = None
+        self._exit_frame_edit_modes()
         self.playing = False
         self.history_mode = True
         self._sync_next_id()
@@ -1205,8 +1213,9 @@ class InteractiveSam2Gui:
         return True
 
     def _step_forward(self) -> bool:
-        self.prompt_edit_mode = False
-        self.prompt_edit_obj_id = None
+        # This happens before testing for a next frame so Space consistently
+        # leaves edit mode even at the end of a sequence.
+        self._exit_frame_edit_modes()
         self._prepare_history_for_forward_tracking()
         step_start = time.perf_counter()
         next_item = self.frame_source.read_next()
@@ -1218,8 +1227,6 @@ class InteractiveSam2Gui:
         self.max_frame_seen = max(int(self.max_frame_seen), int(self.frame_idx + 1))
         self.current_frame, self.current_frame_name = next_item
         self.prompt_states.clear()
-        self.edit_mode = False
-        self.edit_mask = None
         with self._inference_context():
             self.inference_state = self.predictor.add_frame(
                 self.inference_state,

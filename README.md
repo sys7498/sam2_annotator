@@ -90,7 +90,8 @@ frame 상태를 정리하므로 과거 frame에서 수정하면 해당 frame까�
    않도록, ID를 명시적으로 종료한 경우에만 자동 생성한다.
 4. `Space` 또는 `.`은 한 frame 전진하며 SAM2가 현재 ID를 다음 frame으로 전파한다. `,`는
    이전 frame으로 이동한다. 과거 frame에서 mask를 수정한 뒤 `Space`를 누르면 그 지점 이후만
-   앞으로 다시 전파한다. 이전 frame으로 이동하면 active ID가 비워지므로 `g` 또는 `[`/`]`로
+   앞으로 다시 전파한다. `Space`를 누르면 mouse-prompt와 brush edit mode는 항상 종료된다.
+   이전 frame으로 이동하면 active ID가 비워지므로 `g` 또는 `[`/`]`로
    ID를 다시 고른 뒤에만 mouse prompt를 입력할 수 있다.
    `e`는 수정할 ID를 창 안에서 입력한 뒤 영상 위에서 직접 mask를 보정하는 모드다. 이 모드에서
    좌클릭은 positive, 우클릭은 negative prompt이며 `e`를 한 번 더 누르면 종료한다. `p`는
