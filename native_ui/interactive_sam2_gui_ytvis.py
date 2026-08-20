@@ -620,6 +620,14 @@ class InteractiveSam2Gui:
         self.source_px_per_display_px = float(self.frame_w) / float(self.window_width)
 
         self.prompt_states: Dict[int, PromptState] = {}
+        # In-window text input.  OpenCV has no native text field, so ID
+        # commands use this modal overlay instead of blocking on terminal
+        # input().
+        self.text_input_action: Optional[str] = None
+        self.text_input_label = ""
+        self.text_input_value = ""
+        self.text_input_context: Optional[int] = None
+        self.text_input_error = ""
         # `e` selects an existing ID, then turns the video canvas into a
         # point-prompt editor for that exact ID.  Keep this separate from the
         # free click/box workflow and the brush-mask workflow.
@@ -970,129 +978,35 @@ class InteractiveSam2Gui:
         print(f"[GUI] Active ID set to NEW track: {tid} ({use_kind})")
         return True
 
-    def _prompt_select_object_id(self) -> None:
-        self._print_status()
-        try:
-            raw = input("[GUI] Enter track ID to activate (empty=cancel): ").strip()
-        except Exception as exc:
-            print(f"[GUI] input failed: {exc}")
-            return
-        if not raw:
-            return
-        try:
-            tid = int(raw)
-        except Exception:
-            print(f"[GUI] invalid id: {raw}")
-            return
-        self._set_active_object_by_id(tid, create_if_missing=True)
+    def _open_text_input(self, action: str, label: str, *, context: Optional[int] = None) -> None:
+        self.text_input_action = str(action)
+        self.text_input_label = str(label)
+        self.text_input_value = ""
+        self.text_input_context = None if context is None else int(context)
+        self.text_input_error = ""
 
-    def _prompt_edit_active_prompts(self) -> None:
-        if self.active_obj_id is None:
-            self._create_new_active_object()
-        if self.active_obj_id is None:
-            return
-        oid = int(self.active_obj_id)
-        self.prompt_states.setdefault(oid, PromptState())
-        print(f"[GUI] Prompt editor for ID {oid}")
-        print("[GUI] cmds: '+ x y', '- x y', 'del+ N', 'del- N', 'list', 'clear', 'apply', 'status', 'q'")
-        while True:
-            p_cnt, n_cnt = self._prompt_counts(oid)
-            try:
-                raw = input(f"[GUI][id={oid}] +{p_cnt}/-{n_cnt} > ").strip()
-            except Exception as exc:
-                print(f"[GUI] input failed: {exc}")
-                return
-            if not raw:
-                continue
-            cmd = raw.lower()
-            if cmd in {"q", "quit", "exit"}:
-                break
-            if cmd in {"status", "s"}:
-                self._print_status()
-                continue
-            if cmd == "clear":
-                self._clear_active_prompts()
-                continue
-            if cmd == "apply":
-                self._apply_prompt_state(oid)
-                continue
-            if cmd == "list":
-                ps = self.prompt_states.setdefault(oid, PromptState())
-                print(f"[GUI] + prompts: {list(enumerate(ps.pos_points, start=1))}")
-                print(f"[GUI] - prompts: {list(enumerate(ps.neg_points, start=1))}")
-                continue
-            if cmd == "pop+":
-                ps = self.prompt_states.setdefault(oid, PromptState())
-                if ps.pos_points:
-                    ps.pos_points.pop()
-                self._apply_prompt_state(oid)
-                continue
-            if cmd == "pop-":
-                ps = self.prompt_states.setdefault(oid, PromptState())
-                if ps.neg_points:
-                    ps.neg_points.pop()
-                self._apply_prompt_state(oid)
-                continue
-            toks = raw.split()
-            if len(toks) == 2 and toks[0].lower() in {"del+", "del-"}:
-                try:
-                    prompt_index = int(toks[1]) - 1
-                    if prompt_index < 0:
-                        raise ValueError()
-                except Exception:
-                    print("[GUI] use a 1-based prompt index, e.g. del+ 1")
-                    continue
-                ps = self.prompt_states.setdefault(oid, PromptState())
-                prompts = ps.pos_points if toks[0].lower() == "del+" else ps.neg_points
-                if prompt_index >= len(prompts):
-                    print(f"[GUI] prompt index out of range: {prompt_index + 1}")
-                    continue
-                prompts.pop(prompt_index)
-                self._apply_prompt_state(oid)
-                continue
-            if len(toks) == 3 and toks[0] in {"+", "-"}:
-                try:
-                    x = int(float(toks[1]))
-                    y = int(float(toks[2]))
-                except Exception:
-                    print("[GUI] invalid coordinates")
-                    continue
-                x = int(np.clip(x, 0, self.frame_w - 1))
-                y = int(np.clip(y, 0, self.frame_h - 1))
-                ps = self.prompt_states.setdefault(oid, PromptState())
-                if toks[0] == "+":
-                    ps.pos_points.append((x, y))
-                else:
-                    ps.neg_points.append((x, y))
-                self._apply_prompt_state(oid)
-                continue
-            print("[GUI] unknown cmd. use '+ x y', '- x y', del+ N, del- N, list, clear, apply, status, q")
+    def _close_text_input(self) -> None:
+        self.text_input_action = None
+        self.text_input_label = ""
+        self.text_input_value = ""
+        self.text_input_context = None
+        self.text_input_error = ""
 
-    def _prompt_edit_track_prompts(self) -> None:
-        """Select an existing ID, then edit that mask with mouse prompts."""
-        if self.prompt_edit_mode:
-            self.prompt_edit_mode = False
-            self.prompt_edit_obj_id = None
-            print("[GUI] Mouse prompt edit closed.")
-            return
-        self._print_status()
+    def _parse_input_id(self) -> Optional[int]:
         try:
-            raw = input("[GUI] Mouse-edit mask for track ID (empty=cancel): ").strip()
-        except Exception as exc:
-            print(f"[GUI] input failed: {exc}")
-            return
-        if not raw:
-            return
-        try:
-            track_id = int(raw)
+            return int(self.text_input_value)
         except Exception:
-            print(f"[GUI] invalid id: {raw}")
-            return
+            self.text_input_error = "Enter a valid integer ID."
+            return None
+
+    def _begin_mouse_prompt_edit(self, track_id: int) -> bool:
+        """Enable point prompts for one explicit, visible ID."""
+        track_id = int(track_id)
         if not self._set_active_object_by_id(track_id, create_if_missing=False):
-            return
-        if int(track_id) not in self.object_ids:
+            return False
+        if track_id not in self.object_ids:
             print(f"[GUI] ID {track_id} has no visible mask on this frame.")
-            return
+            return False
         self.edit_mode = False
         self.edit_mask = None
         self.paint_mode = 0
@@ -1105,27 +1019,106 @@ class InteractiveSam2Gui:
             f"[GUI] Mouse prompt edit: ID {track_id}. "
             "Left-click=positive, right-click=negative, e=finish."
         )
+        return True
+
+    def _submit_text_input(self) -> None:
+        action = self.text_input_action
+        if action is None:
+            return
+        if action == "delete":
+            tokens = [token.strip() for token in self.text_input_value.split(",") if token.strip()]
+            if not tokens:
+                self.text_input_error = "Enter one or more IDs, e.g. 100,101"
+                return
+            try:
+                ids = [int(token) for token in tokens]
+            except Exception:
+                self.text_input_error = "Use comma-separated integer IDs."
+                return
+            if any(track_id < 0 for track_id in ids):
+                self.text_input_error = "ID must be >= 0."
+                return
+            self._close_text_input()
+            for track_id in sorted(set(ids)):
+                self._delete_object_by_id(track_id)
+            return
+
+        track_id = self._parse_input_id()
+        if track_id is None:
+            return
+        if action == "select":
+            self._set_active_object_by_id(track_id, create_if_missing=True)
+            self._close_text_input()
+            return
+        if action == "new_object":
+            if track_id < 1:
+                self.text_input_error = "Object ID must be >= 1."
+                return
+            if self._set_active_object_by_id(track_id, create_if_missing=True, kind="object"):
+                self.prompt_states[track_id] = PromptState()
+                self._close_text_input()
+            return
+        if action == "mouse_edit":
+            if self._begin_mouse_prompt_edit(track_id):
+                self._close_text_input()
+            else:
+                self.text_input_error = f"ID {track_id} is not visible on this frame."
+            return
+        if action == "rename_old":
+            if not self._set_active_object_by_id(track_id, create_if_missing=False):
+                self.text_input_error = f"ID {track_id} was not found."
+                return
+            self._open_text_input("rename_new", f"New ID for {track_id}", context=track_id)
+            return
+        if action in {"rename_new", "rename_active"}:
+            old_id = self.text_input_context if action == "rename_new" else self.active_obj_id
+            if old_id is None:
+                self.text_input_error = "No active ID to rename."
+                return
+            self.active_obj_id = int(old_id)
+            self._rename_active_object(track_id)
+            self._close_text_input()
+            return
+
+    def _handle_text_input_key(self, key: int) -> bool:
+        if key == 27:
+            self._close_text_input()
+            return False
+        if key in (8, 127):
+            self.text_input_value = self.text_input_value[:-1]
+            self.text_input_error = ""
+            return False
+        if key in (10, 13):
+            self._submit_text_input()
+            return False
+        if 0 <= int(key) <= 255:
+            char = chr(int(key))
+            allowed = "0123456789,-" if self.text_input_action == "delete" else "0123456789-"
+            if char in allowed and len(self.text_input_value) < 48:
+                self.text_input_value += char
+                self.text_input_error = ""
+        return False
+
+    def _prompt_select_object_id(self) -> None:
+        self._open_text_input("select", "Select or create ID")
+
+    def _prompt_edit_active_prompts(self) -> None:
+        if self.active_obj_id is None:
+            self._open_text_input("mouse_edit", "Mask ID to edit")
+            return
+        self._begin_mouse_prompt_edit(int(self.active_obj_id))
+
+    def _prompt_edit_track_prompts(self) -> None:
+        """Open/close the in-window ID field for mouse prompt editing."""
+        if self.prompt_edit_mode:
+            self.prompt_edit_mode = False
+            self.prompt_edit_obj_id = None
+            print("[GUI] Mouse prompt edit closed.")
+            return
+        self._open_text_input("mouse_edit", "Mask ID to edit")
 
     def _prompt_new_object_id(self) -> None:
-        self._print_status()
-        try:
-            raw = input("[GUI] New object ID (empty=use next_obj_id): ").strip()
-        except Exception as exc:
-            print(f"[GUI] input failed: {exc}")
-            return
-        if not raw:
-            self._create_new_active_object()
-            return
-        try:
-            nid = int(raw)
-        except Exception:
-            print(f"[GUI] invalid id: {raw}")
-            return
-        if nid < 1:
-            print("[GUI] object id must be >= 1")
-            return
-        if self._set_active_object_by_id(nid, create_if_missing=True, kind="object"):
-            self.prompt_states[int(nid)] = PromptState()
+        self._open_text_input("new_object", "New object ID")
 
     def _ensure_active_id(self) -> None:
         if self.active_obj_id in self.object_ids:
@@ -1424,42 +1417,7 @@ class InteractiveSam2Gui:
         self._delete_object_by_id(int(self.active_obj_id))
 
     def _prompt_delete_object_id(self) -> None:
-        self._print_status()
-        try:
-            raw = input("[GUI] Delete object ID(s), comma-separated (empty=cancel): ").strip()
-        except Exception as exc:
-            print(f"[GUI] input failed: {exc}")
-            return
-        if not raw:
-            return
-
-        tokens = [tok.strip() for tok in raw.split(",") if tok.strip()]
-        if not tokens:
-            return
-
-        delete_ids: List[int] = []
-        invalid_tokens: List[str] = []
-        seen: set[int] = set()
-        for tok in tokens:
-            try:
-                did = int(tok)
-                if did < 0:
-                    raise ValueError("id must be >= 0")
-            except Exception:
-                invalid_tokens.append(tok)
-                continue
-            if did in seen:
-                continue
-            seen.add(did)
-            delete_ids.append(did)
-
-        if invalid_tokens:
-            print(f"[GUI] invalid ids skipped: {', '.join(invalid_tokens)}")
-        if not delete_ids:
-            return
-
-        for did in delete_ids:
-            self._delete_object_by_id(int(did))
+        self._open_text_input("delete", "Delete ID(s), comma-separated")
 
     def _rename_active_object(self, new_id: int) -> None:
         self._prepare_history_for_forward_tracking()
@@ -1532,34 +1490,7 @@ class InteractiveSam2Gui:
         print(f"[GUI] Renamed ID {old_id} -> {new_id}")
 
     def _prompt_rename_ids(self) -> None:
-        self._print_status()
-        try:
-            raw_old = input("[GUI] Rename old ID (empty=cancel): ").strip()
-        except Exception as exc:
-            print(f"[GUI] input failed: {exc}")
-            return
-        if not raw_old:
-            return
-        try:
-            old_id = int(raw_old)
-        except Exception:
-            print(f"[GUI] invalid old id: {raw_old}")
-            return
-        if not self._set_active_object_by_id(old_id, create_if_missing=False):
-            return
-        try:
-            raw_new = input(f"[GUI] New ID for {old_id}: ").strip()
-        except Exception as exc:
-            print(f"[GUI] input failed: {exc}")
-            return
-        if not raw_new:
-            return
-        try:
-            new_id = int(raw_new)
-        except Exception:
-            print(f"[GUI] invalid new id: {raw_new}")
-            return
-        self._rename_active_object(int(new_id))
+        self._open_text_input("rename_old", "ID to rename")
 
     def _start_edit_mode(self) -> None:
         if self.active_obj_id is None:
@@ -1624,6 +1555,11 @@ class InteractiveSam2Gui:
     def _on_mouse(self, event: int, x: int, y: int, flags: int, _userdata: Any) -> None:
         self.mouse_x = int(x)
         self.mouse_y = int(y)
+
+        # The input overlay owns keyboard focus and ignores canvas clicks, so
+        # an ID entry can never leak through as a mask prompt.
+        if self.text_input_action is not None:
+            return
 
         if event == cv2.EVENT_LBUTTONDOWN and self._point_in_rect(x, y, self.outline_button_rect):
             self._save_outline_only_image()
@@ -1711,6 +1647,9 @@ class InteractiveSam2Gui:
         key = int(key_raw & 0xFF)
         key_has_modifier = bool(key_raw != key)
 
+        if self.text_input_action is not None:
+            return self._handle_text_input_key(key)
+
         # quit
         if key in (27, ord("q")):
             return True
@@ -1770,12 +1709,7 @@ class InteractiveSam2Gui:
             return False
         if key == ord("r"):
             if self.active_obj_id is not None:
-                try:
-                    raw = input(f"new id for {self.active_obj_id}: ").strip()
-                    if raw:
-                        self._rename_active_object(int(raw))
-                except Exception as exc:
-                    print(f"[GUI] rename failed: {exc}")
+                self._open_text_input("rename_active", f"New ID for {self.active_obj_id}")
             return False
         if key == ord("g"):
             self._prompt_select_object_id()
@@ -1978,7 +1912,64 @@ class InteractiveSam2Gui:
             cv2.putText(out, line, origin, cv2.FONT_HERSHEY_SIMPLEX, font_scale, (255, 255, 255), self._display_distance(2.0), cv2.LINE_AA)
 
         self._draw_outline_save_button(out)
+        self._draw_text_input_overlay(out)
         return out
+
+    def _draw_text_input_overlay(self, image: np.ndarray) -> None:
+        if self.text_input_action is None:
+            return
+        height, width = image.shape[:2]
+        box_width = int(min(width - self._display_distance(36.0), max(self._display_distance(480.0), width * 0.56)))
+        box_height = self._display_distance(160.0)
+        x1 = int(max(0, (width - box_width) // 2))
+        y1 = int(max(self._display_distance(28.0), (height - box_height) // 2))
+        x2 = int(min(width - 1, x1 + box_width))
+        y2 = int(min(height - 1, y1 + box_height))
+
+        overlay = image.copy()
+        cv2.rectangle(overlay, (x1, y1), (x2, y2), (8, 13, 19), -1)
+        image[:] = cv2.addWeighted(overlay, 0.93, image, 0.07, 0.0)
+        cv2.rectangle(image, (x1, y1), (x2, y2), (80, 170, 255), self._display_distance(2.0))
+
+        margin = self._display_distance(24.0)
+        title_y = y1 + self._display_distance(42.0)
+        value_y = y1 + self._display_distance(88.0)
+        hint_y = y1 + self._display_distance(132.0)
+        font = cv2.FONT_HERSHEY_SIMPLEX
+        cv2.putText(
+            image,
+            self.text_input_label,
+            (x1 + margin, title_y),
+            font,
+            self._display_font_scale(0.8),
+            (255, 255, 255),
+            self._display_distance(2.0),
+            cv2.LINE_AA,
+        )
+        value = f"> {self.text_input_value}_"
+        cv2.putText(
+            image,
+            value,
+            (x1 + margin, value_y),
+            font,
+            self._display_font_scale(1.0),
+            (100, 220, 255),
+            self._display_distance(2.0),
+            cv2.LINE_AA,
+        )
+        hint = "Type digits | Backspace delete | Enter confirm | Esc cancel"
+        hint_color = (90, 170, 255) if not self.text_input_error else (80, 80, 255)
+        hint_text = self.text_input_error if self.text_input_error else hint
+        cv2.putText(
+            image,
+            hint_text,
+            (x1 + margin, hint_y),
+            font,
+            self._display_font_scale(0.54),
+            hint_color,
+            self._display_distance(1.0),
+            cv2.LINE_AA,
+        )
 
     def _save_active_transparent_crop(self) -> None:
         if self.active_obj_id is None:

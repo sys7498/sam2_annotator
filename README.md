@@ -79,9 +79,10 @@ frame 상태를 정리하므로 과거 frame에서 수정하면 해당 frame까�
 1. 인자 없이 실행하면 기본 5fps dataset의 목록이 열린다. 다른 입력은 `--pick`, `--input`, 또는
    `--dataset`을 쓴다. 여러 영상은 dataset 목록에서
    완료 파일이 **DONE**, 나머지가 **TODO**로 표시된다.
-2. 왼쪽 클릭은 positive point이고, 드래그는 box prompt다. 오른쪽 클릭은 negative point다.
-   `Shift`를 함께 누르면 hand ID를 대상으로 한다.
-3. `n`은 새 object ID, `h`는 새 hand ID, `[`/`]`는 ID 선택, `d`는 삭제, `c`는 ID 변경이다.
+2. 왼쪽 클릭은 active ID의 positive point이고, 드래그는 box prompt다. 오른쪽 클릭은 negative point다.
+   마우스는 active ID를 선택하거나 바꾸지 않는다.
+3. `n`은 새 object ID, `h`는 새 hand ID, `[`/`]`는 ID 선택, `g`는 번호 입력 선택/생성,
+   `d`는 삭제, `c`는 ID 변경이다. ID 입력은 모두 OpenCV 창 안에서 처리된다.
    한 ID를 종료하고 두 ID를 만들면 `1→2 separation`, 두 ID를 종료하고 한 ID를 만들면
    `2→1 joining` predecessor–successor 관계가 자동 생성된다. `l`로 관계를 터미널에
    확인할 수 있고, `lineage_relations.json`과 `lineage_graph.png`에 저장된다. 그래프에서 초록은
@@ -91,9 +92,9 @@ frame 상태를 정리하므로 과거 frame에서 수정하면 해당 frame까�
    이전 frame으로 이동한다. 과거 frame에서 mask를 수정한 뒤 `Space`를 누르면 그 지점 이후만
    앞으로 다시 전파한다. 이전 frame으로 이동하면 active ID가 비워지므로 `g` 또는 `[`/`]`로
    ID를 다시 고른 뒤에만 mouse prompt를 입력할 수 있다.
-   `e`는 수정할 ID만 입력한 뒤 영상 위에서 직접 mask를 보정하는 모드다. 이 모드에서
+   `e`는 수정할 ID를 창 안에서 입력한 뒤 영상 위에서 직접 mask를 보정하는 모드다. 이 모드에서
    좌클릭은 positive, 우클릭은 negative prompt이며 `e`를 한 번 더 누르면 종료한다. `p`는
-   좌표를 직접 입력해야 할 때 쓰는 터미널 prompt 편집기다. `b`는 brush 보정, `a`는 brush
+   현재 active ID로 같은 mouse-prompt 모드를 바로 연다. `b`는 brush 보정, `a`는 brush
    보정 mask 적용, `s`는 저장이다.
 
 출력 JSON은 COCO-style uncompressed RLE를 포함한다. 연구 데이터의 target annotation

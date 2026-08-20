@@ -101,7 +101,7 @@ bash scripts/extract_aria_recording_native_fps.sh --all --overwrite
 4. `Space`로 다음 프레임으로 이동한다. SAM2가 현재 object를 다음 프레임으로 전파한다. `,`로
    이전 프레임을 열 수 있으며, 이때 active ID는 비워진다. `g` 또는 `[`/`]`로 ID를 다시 고른 뒤
    그 프레임을 수정하고 `Space`를 누르면 이후 프레임만 다시 전파한다.
-5. 구조 변화나 tracking 오류가 보이는 프레임에서 `e`를 누르고 ID를 입력한다. 이후 영상에서
+5. 구조 변화나 tracking 오류가 보이는 프레임에서 `e`를 누르고 창 안의 입력창에 ID를 입력한다. 이후 영상에서
    좌클릭으로 포함할 점(positive), 우클릭으로 제외할 점(negative)을 찍어 해당 ID의 mask를
    보정한다. `e`를 한 번 더 누르면 이 모드를 끝낸다. 필요할 때만 `b`로 brush 보정을 사용한다.
 6. `s`로 중간 저장한다. `q` 또는 창 닫기 시에도 자동 저장된다.
@@ -130,13 +130,13 @@ bash scripts/extract_aria_recording_native_fps.sh --all --overwrite
 | `[` / `]` | 이전 / 다음 활성 ID 선택 |
 | `n` | 새 object ID 생성 |
 | `h`, `Shift+n` | 새 hand ID 생성 |
-| `g` | 번호를 입력해 ID 선택 또는 새 ID 생성 |
-| `d` | 번호를 입력해 ID 하나 이상 삭제 |
-| `c`, `r` | 활성 ID 번호 변경 |
+| `g` | 창 안에 번호를 입력해 ID 선택 또는 새 ID 생성 |
+| `d` | 창 안에 번호를 입력해 ID 하나 이상 삭제 |
+| `c`, `r` | 창 안에 새 번호를 입력해 활성 ID 변경 |
 | `x` | 활성 ID의 현재 프레임 point prompt 초기화 |
-| `e` | ID 입력 뒤 해당 ID의 **마우스 prompt 편집 모드** 시작/종료 (좌클릭 positive, 우클릭 negative) |
-| `p` | 현재 활성 ID의 터미널 prompt 편집기 바로 열기 |
-| prompt 편집기 | `+ x y`, `- x y`로 point 추가, `del+ N`, `del- N`으로 N번째 point 삭제, `list`, `clear`, `apply` |
+| `e` | 창 안에 ID 입력 뒤 해당 ID의 **마우스 prompt 편집 모드** 시작/종료 (좌클릭 positive, 우클릭 negative) |
+| `p` | 현재 활성 ID의 마우스 prompt 편집 모드 바로 열기 |
+| 입력창 | 숫자 입력, `Backspace` 삭제, `Enter` 확정, `Esc` 취소. 터미널 입력은 필요 없음. |
 | `v` | 현재 ID·면적·prompt 상태를 터미널에 표시 |
 | `b` | brush mask 편집 모드 시작/취소 |
 | `a` | brush 보정 mask를 SAM2 상태에 적용 |
