@@ -38,8 +38,9 @@ annotation 저장 루트는 `/workspace/shared/aria_recording/5fps_sampled_masks
 결과는 입력과 분리되어 `/workspace/shared/aria_recording/5fps_sampled_masks/<입력_이름>/` 아래에 저장된다.
 마지막 frame에서 `Space`를 한 번 더 누르거나 작업을 `q`/창 닫기로 끝내면 해당 mask를 겹쳐 그린
 `annotation_overlay.mp4`도 자동 저장된다.
-기존 annotation을 다시 열어 새 결과를 저장하면 기존 파일은 유지하고 `annotations_ytvis_2.json`,
-`annotation_overlay_2.mp4`처럼 같은 버전 번호를 붙인다. 같은 실행 중 `s`를 반복하는 경우에는 그 버전만 갱신한다.
+항상 최신 결과는 `annotations_ytvis.json`, `annotation_overlay.mp4` 기본 이름을 쓴다. 새 결과를 저장하면
+기존 기본 파일은 `annotations_ytvis_2.json`, `annotation_overlay_2.mp4`로 옮겨지고, 기존 `_2`는 `_3`으로 밀린다.
+같은 실행 중 `s`를 반복하는 경우에는 최신 기본 파일만 갱신한다.
 
 `--dataset`은 하위 폴더를 재귀적으로 탐색한다. 따라서
 `raw/<사람>/<작업>/rgb.mp4`처럼 중간 폴더가 추가돼도 자동으로 찾고,

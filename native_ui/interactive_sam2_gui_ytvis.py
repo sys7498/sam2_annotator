@@ -727,31 +727,23 @@ class InteractiveSam2Gui:
 
         self.output_dir = os.path.abspath(args.output_dir)
         ensure_dir(self.output_dir)
-        artifact_names = [
+        self.output_artifact_names = [
             str(args.ytvis_out),
             str(getattr(args, "session_meta_out", "interactive_session_meta.json")),
             "annotation_overlay.mp4",
             "lineage_relations.json",
             "lineage_graph.png",
         ]
+        # The current session always owns the unsuffixed names.  Existing
+        # result bundles are moved to _2, _3, ... only when this session first
+        # writes a non-empty annotation.
         self.output_version = 1
-        while any(
-            os.path.exists(os.path.join(self.output_dir, _add_output_version(name, self.output_version)))
-            for name in artifact_names
-        ):
-            self.output_version += 1
-        self.ytvis_out_path = os.path.join(
-            self.output_dir, _add_output_version(str(args.ytvis_out), self.output_version)
-        )
+        self.ytvis_out_path = os.path.join(self.output_dir, str(args.ytvis_out))
         self.session_meta_out_path = os.path.join(
-            self.output_dir,
-            _add_output_version(
-                str(getattr(args, "session_meta_out", "interactive_session_meta.json")), self.output_version
-            ),
+            self.output_dir, str(getattr(args, "session_meta_out", "interactive_session_meta.json"))
         )
-        self.annotation_video_out_path = os.path.join(
-            self.output_dir, _add_output_version("annotation_overlay.mp4", self.output_version)
-        )
+        self.annotation_video_out_path = os.path.join(self.output_dir, "annotation_overlay.mp4")
+        self.output_archive_performed = False
         self.video_name = os.path.splitext(os.path.basename(os.path.abspath(args.input)))[0]
         self.transparent_crop_dir = os.path.join(self.output_dir, "transparent_crops", self.video_name)
         self.outline_only_dir = os.path.join(self.output_dir, "outline_only", self.video_name)
@@ -759,14 +751,11 @@ class InteractiveSam2Gui:
         # Keep contour thick enough for clear visibility when saving.
         self.outline_thickness = int(max(self._display_distance(3.0), round(min(self.frame_h, self.frame_w) / 520.0)))
         self.existing_track_count = self._count_existing_tracks(self.ytvis_out_path)
-        self.has_prior_annotation = any(
-            os.path.isfile(os.path.join(self.output_dir, _add_output_version(str(args.ytvis_out), version)))
-            for version in range(1, self.output_version)
-        )
-        if self.output_version > 1:
+        self.has_prior_annotation = bool(self._existing_output_versions())
+        if self.has_prior_annotation:
             print(
-                f"[GUI] Existing annotation detected; saving this session as version {self.output_version}: "
-                f"{self.ytvis_out_path}"
+                "[GUI] Existing annotation detected. The current result will keep the base name; "
+                "older results will be archived as _2, _3, ... when saved."
             )
 
     @staticmethod
@@ -781,6 +770,40 @@ class InteractiveSam2Gui:
         if not isinstance(payload, list):
             return 0
         return int(sum(1 for x in payload if isinstance(x, dict)))
+
+    def _existing_output_versions(self) -> List[int]:
+        """Find all saved result-bundle version numbers in this output directory."""
+        versions: set[int] = set()
+        try:
+            filenames = os.listdir(self.output_dir)
+        except OSError:
+            return []
+        for artifact_name in self.output_artifact_names:
+            stem, ext = os.path.splitext(artifact_name)
+            pattern = re.compile(rf"^{re.escape(stem)}_(\d+){re.escape(ext)}$")
+            for filename in filenames:
+                if filename == artifact_name:
+                    versions.add(1)
+                    continue
+                match = pattern.match(filename)
+                if match is not None:
+                    versions.add(int(match.group(1)))
+        return sorted(versions)
+
+    def _archive_prior_outputs(self) -> None:
+        """Shift existing results back so this session can use unsuffixed names."""
+        if self.output_archive_performed:
+            return
+        for version in reversed(self._existing_output_versions()):
+            for artifact_name in self.output_artifact_names:
+                source = os.path.join(self.output_dir, _add_output_version(artifact_name, version))
+                if not os.path.exists(source):
+                    continue
+                target = os.path.join(self.output_dir, _add_output_version(artifact_name, version + 1))
+                os.replace(source, target)
+        self.output_archive_performed = True
+        self.existing_track_count = 0
+        self.has_prior_annotation = False
 
     def _inference_context(self):
         """Use SAM2's recommended BF16 CUDA inference path when available."""
@@ -2364,15 +2387,16 @@ class InteractiveSam2Gui:
             if source is not None:
                 source.close()
 
-    def _save_outputs(self, *, force: bool = False, render_video: bool = False) -> None:
+    def _save_outputs(self, *, force: bool = False, render_video: bool = False) -> bool:
         preds = self.track_store.export_predictions(video_id=int(self.args.video_id))
         if (not force) and len(preds) == 0 and (self.existing_track_count > 0 or self.has_prior_annotation):
             print(
                 "[GUI][Warn] Current in-memory tracks are empty; "
                 f"keeping existing file unchanged: {self.ytvis_out_path}"
             )
-            return
+            return False
 
+        self._archive_prior_outputs()
         _write_json_atomic(self.ytvis_out_path, preds)
         self.existing_track_count = int(len(preds))
         num_hand_tracks = int(
@@ -2403,6 +2427,7 @@ class InteractiveSam2Gui:
             self.final_outputs_saved = True
         print(f"[GUI] Saved YTVIS predictions: {self.ytvis_out_path} ({len(preds)} tracks)")
         print(f"[GUI] Saved session metadata: {session_path}")
+        return True
 
 
 def main() -> None:
