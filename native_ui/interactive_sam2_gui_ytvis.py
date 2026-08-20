@@ -788,7 +788,6 @@ class InteractiveSam2Gui:
             track_category_map=self._current_track_category_map(),
         )
         self._sync_next_id()
-        self._ensure_active_id()
         self._trim_predictor_state()
 
     def _trim_predictor_state(self) -> None:
@@ -1113,6 +1112,7 @@ class InteractiveSam2Gui:
         if self.prompt_edit_mode:
             self.prompt_edit_mode = False
             self.prompt_edit_obj_id = None
+            self._clear_active_selection()
             print("[GUI] Mouse prompt edit closed.")
             return
         self._open_text_input("mouse_edit", "Mask ID to edit")
@@ -1131,6 +1131,11 @@ class InteractiveSam2Gui:
             self.active_id_by_kind[kind] = int(self.active_obj_id)
         else:
             self.active_obj_id = None
+
+    def _clear_active_selection(self) -> None:
+        """Require an explicit keyboard ID selection before the next prompt."""
+        self.active_obj_id = None
+        self.active_id_by_kind = {"object": None, "hand": None}
 
     def _invalidate_future_annotations(self, start_frame: int) -> None:
         """Discard masks that will be recomputed by forward-only tracking."""
@@ -1172,7 +1177,7 @@ class InteractiveSam2Gui:
             f"future masks will be recomputed ({len(self.object_ids)} visible tracks)."
         )
 
-    def _exit_frame_edit_modes(self) -> None:
+    def _exit_frame_edit_modes(self, *, clear_active: bool = False) -> None:
         """Discard transient prompt/brush interaction when changing frames."""
         self.prompt_edit_mode = False
         self.prompt_edit_obj_id = None
@@ -1182,6 +1187,8 @@ class InteractiveSam2Gui:
         self.dragging_box = False
         self.drag_start = None
         self.drag_current = None
+        if clear_active:
+            self._clear_active_selection()
 
     def _step_backward(self) -> bool:
         target = int(self.frame_idx - 1)
@@ -1197,15 +1204,13 @@ class InteractiveSam2Gui:
         self.current_masks = self.track_store.masks_at_frame(self.frame_idx)
         self.object_ids = sorted(self.current_masks)
         self.prompt_states.clear()
-        self._exit_frame_edit_modes()
+        self._exit_frame_edit_modes(clear_active=True)
         self.playing = False
         self.history_mode = True
         self._sync_next_id()
         # Historical frames are review/edit checkpoints.  Do not silently
         # select the first visible track: a mouse click must never choose a
         # target or start changing a mask until the annotator selects an ID.
-        self.active_obj_id = None
-        self.active_id_by_kind = {"object": None, "hand": None}
         print(
             f"[GUI] Moved to previous frame {self.frame_idx + 1}. "
             "Select an ID (g or [ ]) before adding prompts, then use Space to propagate forward."
@@ -1215,7 +1220,7 @@ class InteractiveSam2Gui:
     def _step_forward(self) -> bool:
         # This happens before testing for a next frame so Space consistently
         # leaves edit mode even at the end of a sequence.
-        self._exit_frame_edit_modes()
+        self._exit_frame_edit_modes(clear_active=True)
         self._prepare_history_for_forward_tracking()
         step_start = time.perf_counter()
         next_item = self.frame_source.read_next()
@@ -1236,6 +1241,9 @@ class InteractiveSam2Gui:
         backbone_elapsed = time.perf_counter() - step_start - frame_load_elapsed
         tracking_start = time.perf_counter()
         self._refresh_from_tracker()
+        # Tracker refresh must not turn any surviving/new mask into an
+        # implicit prompt target after Space.
+        self._clear_active_selection()
         tracking_elapsed = time.perf_counter() - tracking_start
         self._maybe_gc()
         total_elapsed = time.perf_counter() - step_start
@@ -1300,7 +1308,6 @@ class InteractiveSam2Gui:
         )
         self._trim_predictor_state()
         self._sync_next_id()
-        self._ensure_active_id()
 
     def _apply_prompt_state(self, obj_id: int) -> None:
         """Recompute one ID's current-frame mask after an editor mutation."""
@@ -1358,7 +1365,6 @@ class InteractiveSam2Gui:
         )
         self._trim_predictor_state()
         self._sync_next_id()
-        self._ensure_active_id()
 
     def _clear_active_prompts(self) -> None:
         self._prepare_history_for_forward_tracking()
@@ -1367,6 +1373,7 @@ class InteractiveSam2Gui:
         state_ids = set(self.inference_state.get("obj_ids", [])) if isinstance(self.inference_state, dict) else set()
         if int(self.active_obj_id) not in state_ids:
             self.prompt_states[self.active_obj_id] = PromptState()
+            self._clear_active_selection()
             return
         self.prompt_states[self.active_obj_id] = PromptState()
         try:
@@ -1389,6 +1396,7 @@ class InteractiveSam2Gui:
             track_category_map=self._current_track_category_map(),
         )
         self._trim_predictor_state()
+        self._clear_active_selection()
 
     def _delete_object_by_id(self, obj_id: int) -> None:
         self._prepare_history_for_forward_tracking()
@@ -1416,6 +1424,7 @@ class InteractiveSam2Gui:
         # Keep masks before deletion frame, remove from current frame onward.
         self.track_store.trim_track_from_frame(obj_id, self.frame_idx)
         self._refresh_from_tracker()
+        self._clear_active_selection()
         print(f"[GUI] Deleted track ID: {obj_id}")
 
     def _delete_active_object(self) -> None:
@@ -1494,6 +1503,7 @@ class InteractiveSam2Gui:
             self.current_masks,
             track_category_map=self._current_track_category_map(),
         )
+        self._clear_active_selection()
         print(f"[GUI] Renamed ID {old_id} -> {new_id}")
 
     def _prompt_rename_ids(self) -> None:
@@ -1543,6 +1553,7 @@ class InteractiveSam2Gui:
             track_category_map=self._current_track_category_map(),
         )
         self._cancel_edit_mode()
+        self._clear_active_selection()
         print(f"[GUI] Applied edited mask for ID {obj_id}")
         self._trim_predictor_state()
 
@@ -1739,6 +1750,7 @@ class InteractiveSam2Gui:
             self.prompt_edit_obj_id = None
             if self.edit_mode:
                 self._cancel_edit_mode()
+                self._clear_active_selection()
             else:
                 self._start_edit_mode()
             return False
