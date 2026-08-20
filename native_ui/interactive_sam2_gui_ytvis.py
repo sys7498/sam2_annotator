@@ -173,6 +173,11 @@ def _mask_center(mask: np.ndarray) -> Tuple[int, int]:
 
 @dataclass
 class PromptState:
+    # A foreground anchor is added only when editing an existing propagated
+    # mask.  It gives SAM2 a positive reference when the annotator's first
+    # correction is a negative click.  User prompts remain separate so the
+    # UI can report only the clicks the annotator actually made.
+    anchor_points: List[Tuple[int, int]] = field(default_factory=list)
     pos_points: List[Tuple[int, int]] = field(default_factory=list)
     neg_points: List[Tuple[int, int]] = field(default_factory=list)
 
@@ -1012,6 +1017,7 @@ class InteractiveSam2Gui:
         self.dragging_box = False
         self.drag_start = None
         self.drag_current = None
+        self._ensure_prompt_anchor(track_id)
         self.prompt_edit_mode = True
         self.prompt_edit_obj_id = int(track_id)
         print(
@@ -1019,6 +1025,28 @@ class InteractiveSam2Gui:
             "Left-click=positive, right-click=negative, e=finish."
         )
         return True
+
+    def _ensure_prompt_anchor(self, track_id: int) -> None:
+        """Add one stable foreground reference before editing a tracked mask.
+
+        Point prompts are reset on each frame transition.  Consequently a
+        negative-only edit otherwise reaches SAM2 with no foreground cue.  The
+        deepest pixel inside the current mask is a reliable positive anchor
+        and avoids placing an artificial point on the boundary.
+        """
+        track_id = int(track_id)
+        ps = self.prompt_states.setdefault(track_id, PromptState())
+        if ps.anchor_points or ps.pos_points or ps.neg_points:
+            return
+        mask = self.current_masks.get(track_id)
+        if mask is None or not np.any(mask):
+            return
+        distances = cv2.distanceTransform(mask.astype(np.uint8), cv2.DIST_L2, 5)
+        _, radius, _, max_loc = cv2.minMaxLoc(distances)
+        if float(radius) <= 0.0:
+            return
+        ps.anchor_points.append((int(max_loc[0]), int(max_loc[1])))
+        print(f"[GUI] Edit ID {track_id}: added foreground anchor for negative prompts.")
 
     def _submit_text_input(self) -> None:
         action = self.text_input_action
@@ -1322,10 +1350,10 @@ class InteractiveSam2Gui:
         ps = self.prompt_states.get(obj_id)
         if ps is None:
             return
-        all_points = list(ps.pos_points) + list(ps.neg_points)
+        all_points = list(ps.anchor_points) + list(ps.pos_points) + list(ps.neg_points)
         if not all_points:
             return
-        labels = [1] * len(ps.pos_points) + [0] * len(ps.neg_points)
+        labels = [1] * (len(ps.anchor_points) + len(ps.pos_points)) + [0] * len(ps.neg_points)
         points_np = np.array(all_points, dtype=np.float32)
         labels_np = np.array(labels, dtype=np.int32)
         previous_masks = {track_id: mask.copy() for track_id, mask in self.current_masks.items() if mask is not None}
@@ -1958,6 +1986,19 @@ class InteractiveSam2Gui:
 
         # draw click prompts
         for oid, ps in self.prompt_states.items():
+            for (x, y) in ps.anchor_points:
+                # Cyan diamond = automatic foreground anchor used only to
+                # make a negative-only edit well-defined for SAM2.
+                radius = self._display_distance(6.0)
+                cv2.drawMarker(
+                    out,
+                    (int(x), int(y)),
+                    (255, 255, 0),
+                    markerType=cv2.MARKER_DIAMOND,
+                    markerSize=radius * 2,
+                    thickness=self._display_distance(2.0),
+                    line_type=cv2.LINE_AA,
+                )
             for (x, y) in ps.pos_points:
                 cv2.circle(out, (int(x), int(y)), self._display_distance(6.0), (0, 255, 0), -1)
             for (x, y) in ps.neg_points:
@@ -1975,7 +2016,7 @@ class InteractiveSam2Gui:
             mouse_help = "Brush: left add | right erase | b cancel | a apply"
         elif self.prompt_edit_mode:
             interaction_mode = "PROMPT"
-            mouse_help = "Prompt ID: left positive | right negative | e finish"
+            mouse_help = "Prompt ID: left positive | right negative | cyan diamond = foreground anchor | e finish"
         else:
             interaction_mode = "CLICK"
             mouse_help = "Mouse: active ID only — left positive/box | right negative"
