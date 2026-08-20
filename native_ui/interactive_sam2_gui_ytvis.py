@@ -1200,8 +1200,15 @@ class InteractiveSam2Gui:
         self.playing = False
         self.history_mode = True
         self._sync_next_id()
-        self._ensure_active_id()
-        print(f"[GUI] Moved to previous frame {self.frame_idx + 1}. Edit it, then use Space to propagate forward.")
+        # Historical frames are review/edit checkpoints.  Do not silently
+        # select the first visible track: a mouse click must never choose a
+        # target or start changing a mask until the annotator selects an ID.
+        self.active_obj_id = None
+        self.active_id_by_kind = {"object": None, "hand": None}
+        print(
+            f"[GUI] Moved to previous frame {self.frame_idx + 1}. "
+            "Select an ID (g or [ ]) before adding prompts, then use Space to propagate forward."
+        )
         return True
 
     def _step_forward(self) -> bool:

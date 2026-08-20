@@ -99,7 +99,8 @@ bash scripts/extract_aria_recording_native_fps.sh --all --overwrite
 2. `n`/`h`, `[`/`]`, `g`로 active ID를 먼저 정한 뒤 대상 내부를 좌클릭하거나, 대상을 감싸서 좌드래그한다.
 3. 필요하면 대상 밖/원치 않는 부분을 우클릭해 negative point를 추가한다.
 4. `Space`로 다음 프레임으로 이동한다. SAM2가 현재 object를 다음 프레임으로 전파한다. `,`로
-   이전 프레임을 열 수 있으며, 그 프레임을 수정한 뒤 `Space`를 누르면 이후 프레임만 다시 전파한다.
+   이전 프레임을 열 수 있으며, 이때 active ID는 비워진다. `g` 또는 `[`/`]`로 ID를 다시 고른 뒤
+   그 프레임을 수정하고 `Space`를 누르면 이후 프레임만 다시 전파한다.
 5. 구조 변화나 tracking 오류가 보이는 프레임에서 `e`를 누르고 ID를 입력한다. 이후 영상에서
    좌클릭으로 포함할 점(positive), 우클릭으로 제외할 점(negative)을 찍어 해당 ID의 mask를
    보정한다. `e`를 한 번 더 누르면 이 모드를 끝낸다. 필요할 때만 `b`로 brush 보정을 사용한다.
