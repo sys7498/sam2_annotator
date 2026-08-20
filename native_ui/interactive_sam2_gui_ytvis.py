@@ -3,6 +3,7 @@ import gc
 import json
 import os
 import re
+import subprocess
 import sys
 import time
 from contextlib import ExitStack, nullcontext
@@ -731,6 +732,7 @@ class InteractiveSam2Gui:
             str(args.ytvis_out),
             str(getattr(args, "session_meta_out", "interactive_session_meta.json")),
             "annotation_overlay.mp4",
+            "annotation_overlay_export.log",
             "lineage_relations.json",
             "lineage_graph.png",
         ]
@@ -2404,6 +2406,42 @@ class InteractiveSam2Gui:
             if source is not None:
                 source.close()
 
+    def _start_background_annotation_video_export(self) -> bool:
+        """Launch MP4 rendering outside the GUI process' interaction loop."""
+        exporter = os.path.join(os.path.dirname(PROJECT_ROOT), "scripts", "export_annotation_overlay_mp4.py")
+        if not os.path.isfile(exporter):
+            print(f"[GUI] Annotation MP4 background export unavailable: {exporter}")
+            return False
+        log_path = os.path.join(self.output_dir, "annotation_overlay_export.log")
+        command = [
+            sys.executable,
+            exporter,
+            "--input",
+            os.path.abspath(self.args.input),
+            "--annotations",
+            self.ytvis_out_path,
+            "--output",
+            self.annotation_video_out_path,
+            "--overwrite",
+        ]
+        try:
+            with open(log_path, "ab") as log_handle:
+                process = subprocess.Popen(
+                    command,
+                    stdout=log_handle,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                    close_fds=True,
+                )
+            print(
+                f"[GUI] Annotation MP4 export started in background (pid={process.pid}): "
+                f"{self.annotation_video_out_path}"
+            )
+            return True
+        except Exception as exc:
+            print(f"[GUI] Annotation MP4 background export failed to start: {exc}")
+            return False
+
     def _save_outputs(self, *, force: bool = False, render_video: bool = False) -> bool:
         preds = self.track_store.export_predictions(video_id=int(self.args.video_id))
         if (not force) and len(preds) == 0 and (self.existing_track_count > 0 or self.has_prior_annotation):
@@ -2437,10 +2475,12 @@ class InteractiveSam2Gui:
             "ytvis_output": os.path.abspath(self.ytvis_out_path),
             "last_frame_name": self.current_frame_name,
         }
-        if render_video and self._save_annotation_video():
+        if render_video:
             payload["annotation_overlay_mp4"] = os.path.abspath(self.annotation_video_out_path)
+            payload["annotation_overlay_status"] = "rendering_in_background"
         _write_json_atomic(session_path, payload)
         if render_video:
+            self._start_background_annotation_video_export()
             self.final_outputs_saved = True
         print(f"[GUI] Saved YTVIS predictions: {self.ytvis_out_path} ({len(preds)} tracks)")
         print(f"[GUI] Saved session metadata: {session_path}")

@@ -67,7 +67,8 @@ python desktop_annotator.py --dataset /path/to/videos
 입력 폴더의 하위 구조를 보존해 `<output-dir>/<사람>/<작업>/rgb/`에 저장된다. 결과는
 `/workspace/shared/aria_recording/5fps_sampled_masks/<video_name>/annotations_ytvis.json`,
 `annotation_overlay.mp4`, `interactive_session_meta.json`, `lineage_relations.json`, `lineage_graph.png`에 저장된다.
-마지막 frame에서 `Space`를 한 번 더 누르거나 `q`/창 닫기로 작업을 끝내면 annotation overlay MP4가 자동 생성된다. 항상 가장 최근 결과가
+마지막 frame에서 `Space`를 한 번 더 누르거나 `q`/창 닫기로 작업을 끝내면 annotation overlay MP4 렌더링이 백그라운드에서 시작되어
+다음 영상 선택 화면으로 바로 돌아간다. 진행 로그는 `annotation_overlay_export.log`에 기록된다. 항상 가장 최근 결과가
 `annotations_ytvis.json`, `annotation_overlay.mp4` 기본 이름을 사용한다. 새 작업을 저장할 때 기존 결과 묶음은
 `history/<저장시각>/`로 통째로 이동하며, 그 안에서도 파일명은 기본 이름을 유지한다. 한 번 연 세션에서 `s`를 반복해도
 현재 기본 이름의 파일만 갱신한다.
