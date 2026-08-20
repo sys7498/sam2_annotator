@@ -82,7 +82,8 @@ frame 상태를 정리하므로 과거 frame에서 수정하면 해당 frame까�
 2. 왼쪽 클릭은 active ID의 positive point이고, 드래그는 box prompt다. 오른쪽 클릭은 negative point다.
    마우스는 active ID를 선택하거나 바꾸지 않는다.
 3. `n`은 새 object ID, `h`는 새 hand ID, `[`/`]`는 ID 선택, `g`는 번호 입력 선택/생성,
-   `d`는 삭제, `c`는 ID 변경이다. ID 입력은 모두 OpenCV 창 안에서 처리된다.
+   `d`는 전체 ID 삭제, `f`는 현재 frame에서만 active mask 제거, `c`는 ID 변경이다. `f`는
+   SAM2 메모리와 이후 frame을 유지하므로 겹침/일시 가림 frame에서 쓴다. ID 입력은 모두 OpenCV 창 안에서 처리된다.
    한 ID를 종료하고 두 ID를 만들면 `1→2 separation`, 두 ID를 종료하고 한 ID를 만들면
    `2→1 joining` predecessor–successor 관계가 자동 생성된다. `l`로 관계를 터미널에
    확인할 수 있고, `lineage_relations.json`과 `lineage_graph.png`에 저장된다. 그래프에서 초록은

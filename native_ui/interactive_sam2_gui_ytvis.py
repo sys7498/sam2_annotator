@@ -612,6 +612,10 @@ class InteractiveSam2Gui:
 
         self.object_ids: List[int] = []
         self.current_masks: Dict[int, np.ndarray] = {}
+        # Masks removed with `f` are absent only from the annotation for that
+        # frame.  Keep their pixels privately so the streaming predictor can
+        # still retain the track and bring it back on the following frame.
+        self.frame_suppressed_masks: Dict[int, Dict[int, np.ndarray]] = {}
         self.active_obj_id: Optional[int] = None
         self.next_obj_id = int(max(1, args.start_id))
         self.next_hand_id = int(max(0, getattr(args, "hand_start_id", 0)))
@@ -768,6 +772,17 @@ class InteractiveSam2Gui:
                 out[int(obj_id)] = mask_bool
         return out
 
+    def _suppressed_ids_on_current_frame(self) -> set[int]:
+        return set(self.frame_suppressed_masks.get(int(self.frame_idx), {}).keys())
+
+    def _visible_masks_for_current_frame(self, masks: Dict[int, np.ndarray]) -> Dict[int, np.ndarray]:
+        suppressed = self._suppressed_ids_on_current_frame()
+        return {
+            int(track_id): mask
+            for track_id, mask in masks.items()
+            if int(track_id) not in suppressed and mask is not None
+        }
+
     def _refresh_from_tracker(self) -> None:
         state_ids = self.inference_state.get("obj_ids", []) if isinstance(self.inference_state, dict) else []
         if not state_ids:
@@ -785,8 +800,10 @@ class InteractiveSam2Gui:
             self.inference_state = new_state
         else:
             _, obj_ids, mask_logits = ret
-        self.object_ids = [int(x) for x in obj_ids]
-        self.current_masks = self._decode_masks(self.object_ids, mask_logits)
+        all_object_ids = [int(x) for x in obj_ids]
+        decoded_masks = self._decode_masks(all_object_ids, mask_logits)
+        self.current_masks = self._visible_masks_for_current_frame(decoded_masks)
+        self.object_ids = sorted(self.current_masks)
         self.track_store.update_frame(
             self.frame_idx,
             self.current_masks,
@@ -1179,6 +1196,8 @@ class InteractiveSam2Gui:
         if not self.history_mode:
             return
         seed_masks = self.track_store.masks_at_frame(self.frame_idx)
+        predictor_seed_masks = dict(seed_masks)
+        predictor_seed_masks.update(self.frame_suppressed_masks.get(int(self.frame_idx), {}))
         with self._inference_context():
             self.inference_state = self.predictor.init_state(
                 self.current_frame,
@@ -1186,7 +1205,7 @@ class InteractiveSam2Gui:
                 offload_state_to_cpu=self.offload_state_to_cpu,
             )
             self.predictor_frame_idx = 0
-            for track_id, mask in sorted(seed_masks.items()):
+            for track_id, mask in sorted(predictor_seed_masks.items()):
                 self.predictor.add_new_mask(
                     self.inference_state,
                     frame_idx=self.predictor_frame_idx,
@@ -1324,9 +1343,16 @@ class InteractiveSam2Gui:
         prompt for a new ID must not silently revise already accepted masks.
         """
         edited_id = int(edited_id)
-        self.object_ids = [int(track_id) for track_id in obj_ids]
+        suppressed_ids = self._suppressed_ids_on_current_frame()
+        state_object_ids = [int(track_id) for track_id in obj_ids]
+        self.object_ids = [track_id for track_id in state_object_ids if track_id not in suppressed_ids]
         allowed_ids = set(self.object_ids)
-        updated_masks = self._decode_masks(self.object_ids, mask_logits)
+        # Decode against the full predictor ID order first.  Filtering IDs
+        # before decoding would shift logits when a suppressed track appears
+        # earlier in the predictor state.
+        updated_masks = self._visible_masks_for_current_frame(
+            self._decode_masks(state_object_ids, mask_logits)
+        )
         preserved = {
             int(track_id): mask.copy()
             for track_id, mask in previous_masks.items()
@@ -1460,8 +1486,10 @@ class InteractiveSam2Gui:
                 )
             if isinstance(ret, (tuple, list)) and len(ret) >= 3:
                 _, obj_ids, mask_logits = ret
-                self.object_ids = [int(x) for x in obj_ids]
-                self.current_masks = self._decode_masks(self.object_ids, mask_logits)
+                all_object_ids = [int(x) for x in obj_ids]
+                decoded_masks = self._decode_masks(all_object_ids, mask_logits)
+                self.current_masks = self._visible_masks_for_current_frame(decoded_masks)
+                self.object_ids = sorted(self.current_masks)
         except Exception:
             pass
         self.track_store.update_frame(
@@ -1471,6 +1499,38 @@ class InteractiveSam2Gui:
         )
         self._trim_predictor_state()
         self._clear_active_selection()
+
+    def _suppress_active_mask_on_current_frame(self) -> None:
+        """Remove the active mask from this frame's annotation only.
+
+        Unlike `d`, this never calls ``remove_object`` on SAM2.  It is for an
+        occluded/overlapping frame where one track should be absent in the
+        saved annotation but must still remain in the predictor's temporal
+        memory and reappear on later frames.
+        """
+        if self.active_obj_id is None:
+            print("[GUI] Frame-only remove ignored: select an ID first.")
+            return
+        obj_id = int(self.active_obj_id)
+        mask = self.current_masks.get(obj_id)
+        if mask is None or not np.any(mask):
+            print(f"[GUI] Frame-only remove ignored: ID {obj_id} has no visible mask.")
+            return
+        per_frame = self.frame_suppressed_masks.setdefault(int(self.frame_idx), {})
+        per_frame[obj_id] = mask.copy().astype(bool)
+        self.current_masks.pop(obj_id, None)
+        self.object_ids = [track_id for track_id in self.object_ids if int(track_id) != obj_id]
+        self.prompt_states.pop(obj_id, None)
+        self.track_store.update_frame(
+            self.frame_idx,
+            self.current_masks,
+            track_category_map=self._current_track_category_map(),
+        )
+        self._exit_frame_edit_modes(clear_active=True)
+        print(
+            f"[GUI] Frame-only removed ID {obj_id} on frame {self.frame_idx + 1}; "
+            "SAM2 memory and later frames are unchanged."
+        )
 
     def _delete_object_by_id(self, obj_id: int) -> None:
         self._prepare_history_for_forward_tracking()
@@ -1510,6 +1570,8 @@ class InteractiveSam2Gui:
         except Exception as exc:
             print(f"[GUI] Warning: could not re-seed remaining masks after deletion: {exc}")
         self.prompt_states.pop(obj_id, None)
+        for suppressed in self.frame_suppressed_masks.values():
+            suppressed.pop(obj_id, None)
         if self.prompt_edit_obj_id == obj_id:
             self.prompt_edit_mode = False
             self.prompt_edit_obj_id = None
@@ -1818,6 +1880,9 @@ class InteractiveSam2Gui:
         if key == ord("d"):
             self._prompt_delete_object_id()
             return False
+        if key == ord("f"):
+            self._suppress_active_mask_on_current_frame()
+            return False
         if key == ord("x"):
             self._clear_active_prompts()
             return False
@@ -2027,7 +2092,7 @@ class InteractiveSam2Gui:
                 f"next object: {self.next_obj_id} | next hand: {self.next_hand_id}"
             ),
             mouse_help,
-            "Keys: Space/. next | , previous | n object | h hand | [ ] ID | e mouse prompts | d delete | s save | q exit",
+            "Keys: Space/. next | , previous | n object | h hand | [ ] ID | e prompts | f frame-remove | d delete | s save | q exit",
             "More: p active prompts | b brush edit | a apply brush | g select | c rename | t crop | o outline",
         ]
         y0 = self._display_distance(30.0)
