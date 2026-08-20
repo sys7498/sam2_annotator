@@ -96,7 +96,7 @@ bash scripts/extract_aria_recording_native_fps.sh --all --overwrite
 ## 2. 기본 작업 흐름
 
 1. 첫 프레임에서 `n`으로 새 object ID를 만든다.
-2. 대상 내부를 좌클릭하거나, 대상을 감싸서 좌드래그한다.
+2. `n`/`h`, `[`/`]`, `g`로 active ID를 먼저 정한 뒤 대상 내부를 좌클릭하거나, 대상을 감싸서 좌드래그한다.
 3. 필요하면 대상 밖/원치 않는 부분을 우클릭해 negative point를 추가한다.
 4. `Space`로 다음 프레임으로 이동한다. SAM2가 현재 object를 다음 프레임으로 전파한다. `,`로
    이전 프레임을 열 수 있으며, 그 프레임을 수정한 뒤 `Space`를 누르면 이후 프레임만 다시 전파한다.
@@ -111,16 +111,14 @@ bash scripts/extract_aria_recording_native_fps.sh --all --overwrite
 
 | 조작 | 동작 |
 | --- | --- |
-| 좌클릭 | 활성 object ID에 positive point 추가 |
-| 좌드래그 | 활성 object ID에 box prompt 적용 |
-| 우클릭 | 활성 object ID에 negative point 추가 |
-| Shift + 좌클릭/좌드래그 | hand ID에 positive point/box prompt |
-| Shift + 우클릭 | hand ID에 negative point |
+| 좌클릭 | 활성 ID에 positive point 추가 |
+| 좌드래그 | 활성 ID에 box prompt 적용 |
+| 우클릭 | 활성 ID에 negative point 추가 |
 | 편집 모드에서 좌드래그 | mask 영역 추가 |
 | 편집 모드에서 우드래그 | mask 영역 제거 |
 
-점과 box는 object 또는 hand ID가 없으면 해당 종류의 ID를 자동으로 만든다. box는 해당 ID의 이전
-점 prompt를 대체한다.
+마우스는 active ID를 만들거나 바꾸지 않으며, 클릭한 mask를 선택하지도 않는다. ID 생성은 `n`/`h`,
+선택은 `[`/`]` 또는 `g`로만 한다. box는 active ID의 이전 점 prompt를 대체한다.
 
 ## 4. 키보드 단축키
 

@@ -612,7 +612,6 @@ class InteractiveSam2Gui:
         self.next_hand_id = int(max(0, getattr(args, "hand_start_id", 0)))
         self.active_id_by_kind: Dict[str, Optional[int]] = {"object": None, "hand": None}
         self.track_kind_by_id: Dict[int, str] = {}
-        self.drag_prompt_kind = "object"
 
         # All interaction sizes are specified in *display* units rather than
         # source-frame pixels.  The source frame can be 720p or 4K, while the
@@ -891,30 +890,6 @@ class InteractiveSam2Gui:
             cand += 1
         self.next_obj_id = int(cand + 1)
         return int(cand)
-
-    def _get_active_id_for_kind(self, kind: str, *, create_if_missing: bool = True) -> Optional[int]:
-        kind = "hand" if str(kind) == "hand" else "object"
-        known = self._used_track_ids()
-        active_kind_id = self.active_id_by_kind.get(kind)
-        if active_kind_id is not None and int(active_kind_id) in known:
-            self.active_obj_id = int(active_kind_id)
-            return int(active_kind_id)
-        if (
-            self.active_obj_id is not None
-            and int(self.active_obj_id) in known
-            and self._kind_for_track(int(self.active_obj_id)) == kind
-        ):
-            self.active_id_by_kind[kind] = int(self.active_obj_id)
-            return int(self.active_obj_id)
-        for tid in sorted(known):
-            if self._kind_for_track(int(tid)) != kind:
-                continue
-            self.active_id_by_kind[kind] = int(tid)
-            self.active_obj_id = int(tid)
-            return int(tid)
-        if not create_if_missing:
-            return None
-        return self._create_new_active_object(kind=kind)
 
     def _prompt_counts(self, obj_id: int) -> Tuple[int, int]:
         ps = self.prompt_states.get(int(obj_id))
@@ -1639,40 +1614,6 @@ class InteractiveSam2Gui:
         x1, y1, x2, y2 = rect
         return int(x1) <= int(x) <= int(x2) and int(y1) <= int(y) <= int(y2)
 
-    def _pick_object_id_from_point(self, x: int, y: int, kind_filter: Optional[str] = None) -> Optional[int]:
-        """Pick object id whose current mask contains (x, y).
-
-        Priority:
-        1) active id if it contains the point
-        2) otherwise the smallest-area containing mask (more specific target)
-        """
-        kind = None
-        if kind_filter in {"hand", "object"}:
-            kind = str(kind_filter)
-        x_i = int(np.clip(int(x), 0, self.frame_w - 1))
-        y_i = int(np.clip(int(y), 0, self.frame_h - 1))
-        candidates: List[Tuple[int, int, int]] = []
-        active_pref = self.active_obj_id
-        if kind is not None:
-            active_pref = self.active_id_by_kind.get(kind)
-        for oid, mask in self.current_masks.items():
-            if mask is None:
-                continue
-            if kind is not None and self._kind_for_track(int(oid)) != kind:
-                continue
-            m = mask.astype(bool)
-            if y_i < 0 or y_i >= m.shape[0] or x_i < 0 or x_i >= m.shape[1]:
-                continue
-            if not bool(m[y_i, x_i]):
-                continue
-            area = int(np.count_nonzero(m))
-            active_rank = 0 if (active_pref is not None and int(oid) == int(active_pref)) else 1
-            candidates.append((int(active_rank), int(area), int(oid)))
-        if not candidates:
-            return None
-        candidates.sort(key=lambda t: (int(t[0]), int(t[1]), int(t[2])))
-        return int(candidates[0][2])
-
     def _on_mouse(self, event: int, x: int, y: int, flags: int, _userdata: Any) -> None:
         self.mouse_x = int(x)
         self.mouse_y = int(y)
@@ -1716,7 +1657,9 @@ class InteractiveSam2Gui:
             return
 
         if event == cv2.EVENT_LBUTTONDOWN:
-            self.drag_prompt_kind = "hand" if bool(flags & int(cv2.EVENT_FLAG_SHIFTKEY)) else "object"
+            if self.active_obj_id is None:
+                print("[GUI] Prompt ignored: choose or create an ID first (n/h, [ ], or g).")
+                return
             self.dragging_box = True
             self.drag_start = (int(x), int(y))
             self.drag_current = (int(x), int(y))
@@ -1727,18 +1670,15 @@ class InteractiveSam2Gui:
         elif event == cv2.EVENT_LBUTTONUP and self.dragging_box:
             sx, sy = self.drag_start if self.drag_start is not None else (int(x), int(y))
             ex, ey = int(x), int(y)
-            prompt_kind = str(self.drag_prompt_kind) if self.drag_prompt_kind in {"hand", "object"} else "object"
             self.dragging_box = False
             self.drag_start = None
             self.drag_current = None
 
-            active_id = self._get_active_id_for_kind(prompt_kind, create_if_missing=True)
-            if active_id is None:
+            if self.active_obj_id is None:
+                print("[GUI] Prompt ignored: no active ID.")
                 return
-            oid = int(active_id)
-            self._register_track_kind(int(oid), prompt_kind)
-            self.active_id_by_kind[prompt_kind] = int(oid)
-            self.active_obj_id = int(oid)
+            oid = int(self.active_obj_id)
+            prompt_kind = self._kind_for_track(oid)
             if max(abs(ex - sx), abs(ey - sy)) >= int(self.box_drag_min_size):
                 x1, x2 = min(sx, ex), max(sx, ex)
                 y1, y2 = min(sy, ey), max(sy, ey)
@@ -1749,21 +1689,14 @@ class InteractiveSam2Gui:
                 self._run_click_update(oid, kind=prompt_kind)
             return
         elif event == cv2.EVENT_RBUTTONDOWN:
-            prompt_kind = "hand" if bool(flags & int(cv2.EVENT_FLAG_SHIFTKEY)) else "object"
-            picked_oid = self._pick_object_id_from_point(int(x), int(y), kind_filter=prompt_kind)
-            if picked_oid is None:
-                picked_oid = self._get_active_id_for_kind(prompt_kind, create_if_missing=False)
-            if picked_oid is None:
-                print(f"[GUI] Negative click ignored: no {prompt_kind} mask at point and no active {prompt_kind} ID.")
+            if self.active_obj_id is None:
+                print("[GUI] Negative prompt ignored: choose or create an ID first (n/h, [ ], or g).")
                 return
-            if self.active_obj_id != int(picked_oid):
-                self.active_obj_id = int(picked_oid)
-                print(f"[GUI] Negative click target auto-selected: ID {int(picked_oid)}")
-            self._register_track_kind(int(picked_oid), prompt_kind)
-            self.active_id_by_kind[prompt_kind] = int(picked_oid)
-            ps = self.prompt_states.setdefault(int(picked_oid), PromptState())
+            oid = int(self.active_obj_id)
+            prompt_kind = self._kind_for_track(oid)
+            ps = self.prompt_states.setdefault(oid, PromptState())
             ps.neg_points.append((int(x), int(y)))
-            self._run_click_update(int(picked_oid), kind=prompt_kind)
+            self._run_click_update(oid, kind=prompt_kind)
 
     def _handle_key(self, key: int) -> bool:
         key_raw = int(key)
@@ -2014,7 +1947,7 @@ class InteractiveSam2Gui:
             mouse_help = "Prompt ID: left positive | right negative | e finish"
         else:
             interaction_mode = "CLICK"
-            mouse_help = "Mouse: left click/drag object | Shift + left click/drag hand | right click negative"
+            mouse_help = "Mouse: active ID only — left positive/box | right negative"
         lines = [
             f"Frame {frame_text} | {interaction_mode} | active ID: {self.active_obj_id if self.active_obj_id is not None else '-'}",
             (
