@@ -21,6 +21,7 @@ import numpy as np
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
+DEFAULT_OUTPUT_ROOT = Path("/workspace/shared/aria_recording/annotations")
 NATIVE_UI_ROOT = PROJECT_ROOT / "native_ui"
 SAM2_ROOT = PROJECT_ROOT / "vendor" / "sam2_realtime"
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".mpeg", ".mpg", ".m4v"}
@@ -514,7 +515,7 @@ def _discover_dataset_inputs(gui, base_dir: Path) -> List[tuple[Path, Path]]:
 
     For example, ``raw/jdh/jdh_cups_join/rgb.mp4`` is returned with its
     complete relative path. Its annotations therefore go under
-    ``outputs/jdh/jdh_cups_join/rgb/`` rather than colliding with another
+    ``annotations/jdh/jdh_cups_join/rgb/`` rather than colliding with another
     participant's ``rgb.mp4``.
     """
     found: List[tuple[Path, Path]] = []
@@ -590,7 +591,12 @@ def parse_args() -> argparse.Namespace:
         help="Folder searched recursively for videos/frame-directories; opens a TODO/DONE picker",
     )
     parser.add_argument("--pick", action="store_true", help="Open the operating system file picker")
-    parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "outputs", help="Annotation output root")
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=DEFAULT_OUTPUT_ROOT,
+        help="Annotation output root (default: /workspace/shared/aria_recording/annotations)",
+    )
     parser.add_argument("--checkpoint", default="checkpoints/sam2.1_hiera_small.pt")
     parser.add_argument("--config", default="configs/sam2.1/sam2.1_hiera_s.yaml")
     parser.add_argument("--device", default="cuda")

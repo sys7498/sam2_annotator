@@ -16,24 +16,26 @@ bash scripts/setup_wsl_a6000.sh
 conda activate sam2-annotator
 
 # 파일 탐색기에서 하나 선택
-python desktop_annotator.py --pick --output-dir /workspace/shared/aria_recording/annotations
+python desktop_annotator.py --pick
 
 # 영상 하나를 경로로 지정
-python desktop_annotator.py --input /mnt/c/path/to/video.mp4 --output-dir /path/to/annotations
+python desktop_annotator.py --input /mnt/c/path/to/video.mp4
 
 # 폴더의 영상 목록을 TODO/DONE 상태와 함께 표시
-python desktop_annotator.py --dataset /mnt/c/path/to/videos --output-dir /path/to/annotations
+python desktop_annotator.py --dataset /mnt/c/path/to/videos
 ```
 
 지원 입력은 MP4, AVI, MOV, MKV, WebM, MPEG 계열 영상과 이미지 또는 frame 이미지 폴더다.
-`--output-dir`로 annotation 저장 루트를 지정한다. 생략하면 저장소의 `outputs/`를 사용한다.
+annotation 저장 루트는 `/workspace/shared/aria_recording/annotations`로 고정되어 있다. 다른 경로가
+필요한 경우에만 `--output-dir /path/to/annotations`로 덮어쓴다.
 `--dataset` 실행에서는 입력 데이터셋의 하위 폴더 구조를 유지해
-`<output-dir>/<사람>/<작업>/rgb/`에 결과를 저장한다.
-결과는 입력과 분리되어 `outputs/<입력_이름>/` 아래에 저장된다.
+`/workspace/shared/aria_recording/annotations/<사람>/<작업>/rgb/`에 결과를 저장한다.
+결과는 입력과 분리되어 `/workspace/shared/aria_recording/annotations/<입력_이름>/` 아래에 저장된다.
 
 `--dataset`은 하위 폴더를 재귀적으로 탐색한다. 따라서
 `raw/<사람>/<작업>/rgb.mp4`처럼 중간 폴더가 추가돼도 자동으로 찾고,
-결과도 `outputs/<사람>/<작업>/rgb/`로 분리되어 같은 `rgb.mp4` 파일명이 충돌하지 않는다.
+결과도 `/workspace/shared/aria_recording/annotations/<사람>/<작업>/rgb/`로 분리되어 같은
+`rgb.mp4` 파일명이 충돌하지 않는다.
 
 ## Aria raw 영상 5fps 프레임 추출
 
@@ -169,7 +171,7 @@ relation이 생성되지 않는다.
 각 입력은 다음 경로에 저장된다.
 
 ```text
-outputs/<입력_이름>/
+/workspace/shared/aria_recording/annotations/<입력_이름>/
 ├── annotations_ytvis.json
 ├── interactive_session_meta.json
 ├── lineage_relations.json
