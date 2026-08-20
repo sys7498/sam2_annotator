@@ -1402,6 +1402,14 @@ class InteractiveSam2Gui:
         self._prepare_history_for_forward_tracking()
         obj_id = int(obj_id)
         obj_kind = self._kind_for_track(int(obj_id))
+        # Keep the masks currently shown in the canvas.  They can include a
+        # just-applied e-mode correction; re-querying the predictor after
+        # remove_object may return an older cached output for those tracks.
+        preserved_masks = {
+            int(track_id): mask.copy()
+            for track_id, mask in self.current_masks.items()
+            if int(track_id) != obj_id and mask is not None
+        }
         try:
             with self._inference_context():
                 obj_ids, _ = self.predictor.remove_object(
@@ -1413,7 +1421,12 @@ class InteractiveSam2Gui:
             self.object_ids = [int(x) for x in obj_ids]
         except Exception:
             self.object_ids = [x for x in self.object_ids if int(x) != obj_id]
-        self.current_masks.pop(obj_id, None)
+        remaining_ids = set(int(track_id) for track_id in self.object_ids)
+        self.current_masks = {
+            track_id: mask
+            for track_id, mask in preserved_masks.items()
+            if track_id in remaining_ids
+        }
         self.prompt_states.pop(obj_id, None)
         if self.prompt_edit_obj_id == obj_id:
             self.prompt_edit_mode = False
@@ -1423,8 +1436,12 @@ class InteractiveSam2Gui:
             self.active_id_by_kind[obj_kind] = None
         # Keep masks before deletion frame, remove from current frame onward.
         self.track_store.trim_track_from_frame(obj_id, self.frame_idx)
-        self._refresh_from_tracker()
-        self._clear_active_selection()
+        self.track_store.update_frame(
+            self.frame_idx,
+            self.current_masks,
+            track_category_map=self._current_track_category_map(),
+        )
+        self._exit_frame_edit_modes(clear_active=True)
         print(f"[GUI] Deleted track ID: {obj_id}")
 
     def _delete_active_object(self) -> None:
