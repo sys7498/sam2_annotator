@@ -16,16 +16,19 @@ bash scripts/setup_wsl_a6000.sh
 conda activate sam2-annotator
 
 # 파일 탐색기에서 하나 선택
-python desktop_annotator.py --pick
+python desktop_annotator.py --pick --output-dir /workspace/shared/aria_recording/annotations
 
 # 영상 하나를 경로로 지정
-python desktop_annotator.py --input /mnt/c/path/to/video.mp4
+python desktop_annotator.py --input /mnt/c/path/to/video.mp4 --output-dir /path/to/annotations
 
 # 폴더의 영상 목록을 TODO/DONE 상태와 함께 표시
-python desktop_annotator.py --dataset /mnt/c/path/to/videos
+python desktop_annotator.py --dataset /mnt/c/path/to/videos --output-dir /path/to/annotations
 ```
 
 지원 입력은 MP4, AVI, MOV, MKV, WebM, MPEG 계열 영상과 이미지 또는 frame 이미지 폴더다.
+`--output-dir`로 annotation 저장 루트를 지정한다. 생략하면 저장소의 `outputs/`를 사용한다.
+`--dataset` 실행에서는 입력 데이터셋의 하위 폴더 구조를 유지해
+`<output-dir>/<사람>/<작업>/rgb/`에 결과를 저장한다.
 결과는 입력과 분리되어 `outputs/<입력_이름>/` 아래에 저장된다.
 
 `--dataset`은 하위 폴더를 재귀적으로 탐색한다. 따라서
