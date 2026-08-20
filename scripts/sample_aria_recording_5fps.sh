@@ -4,7 +4,7 @@ set -euo pipefail
 
 ARIA_RECORDING_ROOT="${ARIA_RECORDING_ROOT:-/workspace/shared/aria_recording}"
 SOURCE_ROOT="$ARIA_RECORDING_ROOT/raw"
-DESTINATION_ROOT="$ARIA_RECORDING_ROOT/5fps_sampled"
+DESTINATION_ROOT="$ARIA_RECORDING_ROOT/5fps_sampled_sequences"
 OVERWRITE=0
 DRY_RUN=0
 SAMPLE_ALL=0
@@ -21,7 +21,7 @@ Examples:
   bash scripts/sample_aria_recording_5fps.sh jdh --overwrite
 
 The default source is /workspace/shared/aria_recording/raw/<participant_folder>.
-Output is written to /workspace/shared/aria_recording/5fps_sampled/<participant_folder>,
+Output is written to /workspace/shared/aria_recording/5fps_sampled_sequences/<participant_folder>,
 with every intermediate directory preserved. Each `rgb.mp4` becomes an `rgb/` folder
 with `000000.jpg`, `000001.jpg`, ... at 5 fps. Set ARIA_RECORDING_ROOT to override this root.
 EOF

@@ -21,7 +21,8 @@ import numpy as np
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DEFAULT_OUTPUT_ROOT = Path("/workspace/shared/aria_recording/annotations")
+DEFAULT_DATASET_ROOT = Path("/workspace/shared/aria_recording/5fps_sampled_sequences")
+DEFAULT_OUTPUT_ROOT = Path("/workspace/shared/aria_recording/5fps_sampled_masks")
 NATIVE_UI_ROOT = PROJECT_ROOT / "native_ui"
 SAM2_ROOT = PROJECT_ROOT / "vendor" / "sam2_realtime"
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".mpeg", ".mpg", ".m4v"}
@@ -595,7 +596,7 @@ def parse_args() -> argparse.Namespace:
         "--output-dir",
         type=Path,
         default=DEFAULT_OUTPUT_ROOT,
-        help="Annotation output root (default: /workspace/shared/aria_recording/annotations)",
+        help="Annotation output root (default: /workspace/shared/aria_recording/5fps_sampled_masks)",
     )
     parser.add_argument("--checkpoint", default="checkpoints/sam2.1_hiera_small.pt")
     parser.add_argument("--config", default="configs/sam2.1/sam2.1_hiera_s.yaml")
@@ -624,7 +625,8 @@ def main() -> None:
         if picked:
             options.input = Path(picked)
     if options.input is None and options.dataset is None:
-        raise SystemExit("Use --pick, --input PATH, or --dataset FOLDER. See --help.")
+        options.dataset = DEFAULT_DATASET_ROOT
+        print(f"[Launcher] Default dataset: {options.dataset}")
 
     gui = _load_gui_module()
     gui.LineageInteractiveSam2Gui = _make_lineage_gui_class(gui)
