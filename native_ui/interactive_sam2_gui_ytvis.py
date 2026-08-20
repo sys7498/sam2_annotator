@@ -1427,6 +1427,23 @@ class InteractiveSam2Gui:
             for track_id, mask in preserved_masks.items()
             if track_id in remaining_ids
         }
+        # ``remove_object`` remaps its per-object caches but does not make
+        # surviving masks fresh conditioning inputs.  Re-injecting the
+        # currently displayed masks prevents a later new-ID prompt from
+        # resurrecting a stale pre-edit prediction.
+        try:
+            with self._inference_context():
+                for track_id, mask in sorted(self.current_masks.items()):
+                    ret = self.predictor.add_new_mask(
+                        self.inference_state,
+                        frame_idx=self.predictor_frame_idx,
+                        obj_id=int(track_id),
+                        mask=mask.astype(bool),
+                    )
+                    if isinstance(ret, (tuple, list)) and len(ret) >= 4:
+                        self.inference_state = ret[3]
+        except Exception as exc:
+            print(f"[GUI] Warning: could not re-seed remaining masks after deletion: {exc}")
         self.prompt_states.pop(obj_id, None)
         if self.prompt_edit_obj_id == obj_id:
             self.prompt_edit_mode = False
