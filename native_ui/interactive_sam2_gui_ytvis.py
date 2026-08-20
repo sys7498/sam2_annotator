@@ -1267,6 +1267,52 @@ class InteractiveSam2Gui:
         print(f"[GUI] Active ID set to new {kind}: {self.active_obj_id}")
         return int(new_id)
 
+    def _reseed_masks(self, masks: Dict[int, np.ndarray]) -> None:
+        """Make preserved masks authoritative conditioning inputs in SAM2."""
+        if not masks:
+            return
+        with self._inference_context():
+            for track_id, mask in sorted(masks.items()):
+                ret = self.predictor.add_new_mask(
+                    self.inference_state,
+                    frame_idx=self.predictor_frame_idx,
+                    obj_id=int(track_id),
+                    mask=mask.astype(bool),
+                )
+                if isinstance(ret, (tuple, list)) and len(ret) >= 4:
+                    self.inference_state = ret[3]
+
+    def _keep_other_masks_after_prompt(
+        self,
+        edited_id: int,
+        previous_masks: Dict[int, np.ndarray],
+        obj_ids: List[int],
+        mask_logits: Any,
+    ) -> None:
+        """Keep non-target tracks fixed when SAM2 returns a multi-ID update.
+
+        SAM2 returns masks for every active ID after one prompt.  Those
+        non-target outputs can be stale after object deletion/reindexing, so a
+        prompt for a new ID must not silently revise already accepted masks.
+        """
+        edited_id = int(edited_id)
+        self.object_ids = [int(track_id) for track_id in obj_ids]
+        allowed_ids = set(self.object_ids)
+        updated_masks = self._decode_masks(self.object_ids, mask_logits)
+        preserved = {
+            int(track_id): mask.copy()
+            for track_id, mask in previous_masks.items()
+            if int(track_id) != edited_id and int(track_id) in allowed_ids and mask is not None
+        }
+        self.current_masks = dict(preserved)
+        if edited_id in updated_masks:
+            self.current_masks[edited_id] = updated_masks[edited_id]
+        elif edited_id in previous_masks:
+            self.current_masks[edited_id] = previous_masks[edited_id].copy()
+        # Re-seed only non-target masks: re-seeding the target would replace
+        # its just-added point/box prompt.
+        self._reseed_masks(preserved)
+
     def _run_click_update(self, obj_id: int, kind: Optional[str] = None) -> None:
         self._prepare_history_for_forward_tracking()
         obj_id = int(obj_id)
@@ -1282,6 +1328,7 @@ class InteractiveSam2Gui:
         labels = [1] * len(ps.pos_points) + [0] * len(ps.neg_points)
         points_np = np.array(all_points, dtype=np.float32)
         labels_np = np.array(labels, dtype=np.int32)
+        previous_masks = {track_id: mask.copy() for track_id, mask in self.current_masks.items() if mask is not None}
 
         with self._inference_context():
             ret = self.predictor.add_new_points_or_box(
@@ -1299,8 +1346,7 @@ class InteractiveSam2Gui:
             self.inference_state = new_state
         else:
             _, obj_ids, mask_logits = ret
-        self.object_ids = [int(x) for x in obj_ids]
-        self.current_masks = self._decode_masks(self.object_ids, mask_logits)
+        self._keep_other_masks_after_prompt(obj_id, previous_masks, list(obj_ids), mask_logits)
         self.track_store.update_frame(
             self.frame_idx,
             self.current_masks,
@@ -1339,6 +1385,7 @@ class InteractiveSam2Gui:
             return
 
         box_np = np.array([x1, y1, x2, y2], dtype=np.float32)
+        previous_masks = {track_id: mask.copy() for track_id, mask in self.current_masks.items() if mask is not None}
         with self._inference_context():
             ret = self.predictor.add_new_points_or_box(
                 self.inference_state,
@@ -1354,8 +1401,7 @@ class InteractiveSam2Gui:
             self.inference_state = new_state
         else:
             _, obj_ids, mask_logits = ret
-        self.object_ids = [int(x) for x in obj_ids]
-        self.current_masks = self._decode_masks(self.object_ids, mask_logits)
+        self._keep_other_masks_after_prompt(obj_id, previous_masks, list(obj_ids), mask_logits)
         # Box prompt is a replacement-style interaction; clear stored click prompts for this ID.
         self.prompt_states[int(obj_id)] = PromptState()
         self.track_store.update_frame(
@@ -1432,16 +1478,7 @@ class InteractiveSam2Gui:
         # currently displayed masks prevents a later new-ID prompt from
         # resurrecting a stale pre-edit prediction.
         try:
-            with self._inference_context():
-                for track_id, mask in sorted(self.current_masks.items()):
-                    ret = self.predictor.add_new_mask(
-                        self.inference_state,
-                        frame_idx=self.predictor_frame_idx,
-                        obj_id=int(track_id),
-                        mask=mask.astype(bool),
-                    )
-                    if isinstance(ret, (tuple, list)) and len(ret) >= 4:
-                        self.inference_state = ret[3]
+            self._reseed_masks(self.current_masks)
         except Exception as exc:
             print(f"[GUI] Warning: could not re-seed remaining masks after deletion: {exc}")
         self.prompt_states.pop(obj_id, None)
@@ -1567,6 +1604,7 @@ class InteractiveSam2Gui:
         obj_id = int(self.active_obj_id)
         obj_kind = self._register_track_kind(int(obj_id), self._kind_for_track(int(obj_id)))
         self.active_id_by_kind[obj_kind] = int(obj_id)
+        previous_masks = {track_id: mask.copy() for track_id, mask in self.current_masks.items() if mask is not None}
         with self._inference_context():
             ret = self.predictor.add_new_mask(
                 self.inference_state,
@@ -1576,8 +1614,7 @@ class InteractiveSam2Gui:
             )
         if isinstance(ret, (tuple, list)) and len(ret) >= 3:
             _, obj_ids, mask_logits = ret
-            self.object_ids = [int(x) for x in obj_ids]
-            self.current_masks = self._decode_masks(self.object_ids, mask_logits)
+            self._keep_other_masks_after_prompt(obj_id, previous_masks, list(obj_ids), mask_logits)
         else:
             self._refresh_from_tracker()
         self.prompt_states[obj_id] = PromptState()
