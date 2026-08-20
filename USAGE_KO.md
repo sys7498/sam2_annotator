@@ -60,6 +60,29 @@ ARIA_RECORDING_ROOT=/다른/aria_recording \
 macOS metadata 파일(`._rgb.mp4`)은 자동으로 건너뛴다. JPEG 품질은 FFmpeg `-q:v 2`이며,
 audio는 추출하지 않는다. 중단된 작업은 완성된 `rgb/` 폴더를 건너뛰고 나머지부터 재개한다.
 
+## Aria 원본 FPS 전체 프레임 추출
+
+5fps annotation용 시퀀스와 별도로, 원본의 모든 frame을 JPEG로 보관하려면 다음 스크립트를 쓴다.
+영상의 실제 FPS에 따라 출력 폴더가 자동으로 정해진다. 현재 Aria raw 영상은 모두 30fps이므로
+`raw/jdh/**/rgb.mp4`는 `30fps_raw/jdh/**/rgb/000000.jpg` 형태로 저장된다.
+
+```bash
+# 처리 대상을 먼저 확인
+bash scripts/extract_aria_recording_native_fps.sh jdh --dry-run
+
+# 사람 한 명의 모든 원본 frame 추출
+bash scripts/extract_aria_recording_native_fps.sh jdh
+
+# raw/ 아래 모든 사람의 원본 frame 추출
+bash scripts/extract_aria_recording_native_fps.sh --all
+
+# 기존 결과를 다시 만들 때만 사용
+bash scripts/extract_aria_recording_native_fps.sh --all --overwrite
+```
+
+원본 FPS 추출은 FFmpeg rate conversion을 하지 않아 source video frame 하나당 JPEG 하나를 만든다.
+5fps 결과와 분리된 `30fps_raw/`에 기록되며, 이미 완성된 시퀀스는 자동으로 건너뛴다.
+
 ## 2. 기본 작업 흐름
 
 1. 첫 프레임에서 `n`으로 새 object ID를 만든다.

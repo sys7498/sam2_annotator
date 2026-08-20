@@ -37,6 +37,13 @@ Aria raw recordings를 사람별 5fps JPEG 프레임 시퀀스로 만들려면 �
 bash scripts/sample_aria_recording_5fps.sh <사람_폴더명>
 ```
 
+원본 FPS의 모든 프레임도 필요하면 별도 추출한다. 예를 들어 30fps 원본은
+`/workspace/shared/aria_recording/30fps_raw/<사람>/<작업>/rgb/000000.jpg`에 저장된다.
+
+```bash
+bash scripts/extract_aria_recording_native_fps.sh --all
+```
+
 ## 실행
 
 ```bash
