@@ -36,11 +36,23 @@ annotation 저장 루트는 `/workspace/shared/aria_recording/5fps_sampled_masks
 `--dataset` 실행에서는 입력 데이터셋의 하위 폴더 구조를 유지해
 `/workspace/shared/aria_recording/5fps_sampled_masks/<사람>/<작업>/rgb/`에 결과를 저장한다.
 결과는 입력과 분리되어 `/workspace/shared/aria_recording/5fps_sampled_masks/<입력_이름>/` 아래에 저장된다.
+마지막 frame에서 `Space`를 한 번 더 누르거나 작업을 `q`/창 닫기로 끝내면 해당 mask를 겹쳐 그린
+`annotation_overlay.mp4`도 자동 저장된다.
+기존 annotation을 다시 열어 새 결과를 저장하면 기존 파일은 유지하고 `annotations_ytvis_2.json`,
+`annotation_overlay_2.mp4`처럼 같은 버전 번호를 붙인다. 같은 실행 중 `s`를 반복하는 경우에는 그 버전만 갱신한다.
 
 `--dataset`은 하위 폴더를 재귀적으로 탐색한다. 따라서
 `raw/<사람>/<작업>/rgb.mp4`처럼 중간 폴더가 추가돼도 자동으로 찾고,
 결과도 `/workspace/shared/aria_recording/5fps_sampled_masks/<사람>/<작업>/rgb/`로 분리되어 같은
 `rgb.mp4` 파일명이 충돌하지 않는다.
+
+기존 JSON 결과에 MP4만 추가로 만들려면 다음을 실행한다.
+
+```bash
+python scripts/export_annotation_overlay_mp4.py \
+  --input /workspace/shared/aria_recording/5fps_sampled_sequences/<사람>/<작업>/rgb \
+  --annotations /workspace/shared/aria_recording/5fps_sampled_masks/<사람>/<작업>/rgb/annotations_ytvis.json
+```
 
 ## Aria raw 영상 5fps 프레임 추출
 

@@ -66,7 +66,10 @@ python desktop_annotator.py --dataset /path/to/videos
 `--output-dir /path/to/annotations`로 덮어쓸 수 있다. Dataset 입력은
 입력 폴더의 하위 구조를 보존해 `<output-dir>/<사람>/<작업>/rgb/`에 저장된다. 결과는
 `/workspace/shared/aria_recording/5fps_sampled_masks/<video_name>/annotations_ytvis.json`,
-`interactive_session_meta.json`, `lineage_relations.json`, `lineage_graph.png`에 저장된다.
+`annotation_overlay.mp4`, `interactive_session_meta.json`, `lineage_relations.json`, `lineage_graph.png`에 저장된다.
+마지막 frame에서 `Space`를 한 번 더 누르거나 `q`/창 닫기로 작업을 끝내면 annotation overlay MP4가 자동 생성된다. 이미 annotation이 있는
+시퀀스를 새로 열면 기존 결과를 보존하고 `annotations_ytvis_2.json`, `annotation_overlay_2.mp4`처럼
+같은 버전 번호를 붙인 새 결과 묶음을 만든다. 한 번 연 세션에서 `s`를 반복해도 그 세션의 파일만 갱신한다.
 `lineage_graph.png`는 ID별 mask 구간과 separation/joining 화살표를 한눈에 보여 주며, `s`로
 중간 저장하거나 창을 닫고 `q`로 종료할 때마다 갱신된다. Windows 쪽 영상은 WSL에서 `/mnt/c/...` 경로로
 지정하거나 `--pick`으로 선택할 수 있다.
@@ -98,6 +101,14 @@ frame 상태를 정리하므로 과거 frame에서 수정하면 해당 frame까�
    좌클릭은 positive, 우클릭은 negative prompt이며 `e`를 한 번 더 누르면 종료한다. `p`는
    현재 active ID로 같은 mouse-prompt 모드를 바로 연다. `b`는 brush 보정, `a`는 brush
    보정 mask 적용, `s`는 저장이다.
+
+기존 JSON만 있는 결과는 다음으로 overlay MP4를 별도로 만들 수 있다.
+
+```bash
+python scripts/export_annotation_overlay_mp4.py \
+  --input /workspace/shared/aria_recording/5fps_sampled_sequences/<사람>/<작업>/rgb \
+  --annotations /workspace/shared/aria_recording/5fps_sampled_masks/<사람>/<작업>/rgb/annotations_ytvis.json
+```
 
 출력 JSON은 COCO-style uncompressed RLE를 포함한다. 연구 데이터의 target annotation
 rate(5 fps)에 맞춰 제출 전 sampling pass를 수행한다.

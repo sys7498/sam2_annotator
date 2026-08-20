@@ -415,16 +415,17 @@ def _make_lineage_gui_class(gui):
                 return False
             return bool(super()._handle_key(key))
 
-        def _save_outputs(self, *, force: bool = False) -> None:
-            super()._save_outputs(force=force)
+        def _save_outputs(self, *, force: bool = False, render_video: bool = False) -> None:
+            super()._save_outputs(force=force, render_video=render_video)
             output_dir = Path(self.output_dir)
-            relation_path = output_dir / "lineage_relations.json"
+            output_version = int(getattr(self, "output_version", 1))
+            relation_path = output_dir / gui._add_output_version("lineage_relations.json", output_version)
             temporary = relation_path.with_suffix(".json.tmp")
             with temporary.open("w", encoding="utf-8") as handle:
                 json.dump(self.lineage.payload(), handle, ensure_ascii=False, indent=2)
             temporary.replace(relation_path)
 
-            graph_path = output_dir / "lineage_graph.png"
+            graph_path = output_dir / gui._add_output_version("lineage_graph.png", output_version)
             graph_saved = False
             try:
                 _render_lineage_graph(
@@ -439,7 +440,7 @@ def _make_lineage_gui_class(gui):
             except Exception as exc:
                 print(f"[Lineage] Graph rendering skipped: {exc}")
 
-            session_path = output_dir / str(self.args.session_meta_out)
+            session_path = Path(getattr(self, "session_meta_out_path", output_dir / str(self.args.session_meta_out)))
             try:
                 with session_path.open("r", encoding="utf-8") as handle:
                     session = json.load(handle)

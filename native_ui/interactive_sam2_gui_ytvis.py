@@ -2,6 +2,7 @@
 import gc
 import json
 import os
+import re
 import sys
 import time
 from contextlib import ExitStack, nullcontext
@@ -59,11 +60,31 @@ def _format_key_event(key_raw: int) -> str:
     return f"{label} (raw={raw})" if raw != key else label
 
 
+def _add_output_version(filename: str, version: int) -> str:
+    """Return ``name_2.ext`` for version 2, otherwise the original name."""
+    if int(version) <= 1:
+        return str(filename)
+    stem, ext = os.path.splitext(str(filename))
+    return f"{stem}_{int(version)}{ext}"
+
+
+def _infer_sequence_fps(path: str) -> float:
+    """Infer FPS from a sampled-frame directory name, defaulting to 5 fps."""
+    for component in reversed(os.path.normpath(os.path.abspath(path)).split(os.sep)):
+        match = re.search(r"(?:^|[^0-9])(\d+(?:\.\d+)?)fps(?:$|[^a-z0-9])", component.lower())
+        if match is not None:
+            try:
+                return float(match.group(1))
+            except ValueError:
+                pass
+    return 5.0
+
+
 class StreamFrameSource:
     def __init__(self, input_path: str, max_frames: Optional[int]) -> None:
         self.input_path = os.path.abspath(input_path)
         self.max_frames = int(max_frames) if max_frames is not None else None
-        self.fps = 10.0
+        self.fps = 5.0
         self.total_frames: Optional[int] = None
         self.read_count = 0
         if os.path.isdir(self.input_path):
@@ -85,6 +106,7 @@ class StreamFrameSource:
                 paths = paths[: max(0, self.max_frames)]
             self._paths = paths
             self.total_frames = len(self._paths)
+            self.fps = _infer_sequence_fps(self.input_path)
             return
 
         cap = cv2.VideoCapture(self.input_path)
@@ -169,6 +191,41 @@ def _mask_center(mask: np.ndarray) -> Tuple[int, int]:
     if len(xs) == 0:
         return 0, 0
     return int(xs.mean()), int(ys.mean())
+
+
+def render_annotation_overlay(frame: np.ndarray, masks: Dict[int, np.ndarray]) -> np.ndarray:
+    """Render a clean annotation overlay suitable for a result MP4."""
+    out = frame.copy()
+    height, width = out.shape[:2]
+    thickness = int(max(2, round(min(height, width) / 520.0)))
+    font_scale = max(0.42, min(0.9, min(height, width) / 1100.0))
+    for obj_id in sorted(masks):
+        mask = masks.get(int(obj_id))
+        if mask is None or not np.any(mask):
+            continue
+        mask_bool = mask.astype(bool)
+        if mask_bool.shape[:2] != (height, width):
+            mask_bool = cv2.resize(
+                mask_bool.astype(np.uint8), (width, height), interpolation=cv2.INTER_NEAREST
+            ).astype(bool)
+        color = _id_color(int(obj_id))
+        overlay = out.copy()
+        overlay[mask_bool] = color
+        out = cv2.addWeighted(overlay, 0.42, out, 0.58, 0.0)
+        contours, _ = cv2.findContours(mask_bool.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(out, contours, -1, color, thickness, lineType=cv2.LINE_AA)
+        cx, cy = _mask_center(mask_bool)
+        cv2.putText(
+            out,
+            f"id:{int(obj_id)}",
+            (int(cx), int(cy)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            color,
+            thickness,
+            cv2.LINE_AA,
+        )
+    return out
 
 
 @dataclass
@@ -655,6 +712,7 @@ class InteractiveSam2Gui:
 
         # Interactive labeling is step-driven: advance only when user presses a key.
         self.playing = False
+        self.final_outputs_saved = False
         use_fps = float(args.play_fps) if args.play_fps and args.play_fps > 0 else float(self.frame_source.fps)
         self.play_interval = 1.0 / max(use_fps, 1e-6)
         self.last_tick = time.time()
@@ -669,7 +727,31 @@ class InteractiveSam2Gui:
 
         self.output_dir = os.path.abspath(args.output_dir)
         ensure_dir(self.output_dir)
-        self.ytvis_out_path = os.path.join(self.output_dir, args.ytvis_out)
+        artifact_names = [
+            str(args.ytvis_out),
+            str(getattr(args, "session_meta_out", "interactive_session_meta.json")),
+            "annotation_overlay.mp4",
+            "lineage_relations.json",
+            "lineage_graph.png",
+        ]
+        self.output_version = 1
+        while any(
+            os.path.exists(os.path.join(self.output_dir, _add_output_version(name, self.output_version)))
+            for name in artifact_names
+        ):
+            self.output_version += 1
+        self.ytvis_out_path = os.path.join(
+            self.output_dir, _add_output_version(str(args.ytvis_out), self.output_version)
+        )
+        self.session_meta_out_path = os.path.join(
+            self.output_dir,
+            _add_output_version(
+                str(getattr(args, "session_meta_out", "interactive_session_meta.json")), self.output_version
+            ),
+        )
+        self.annotation_video_out_path = os.path.join(
+            self.output_dir, _add_output_version("annotation_overlay.mp4", self.output_version)
+        )
         self.video_name = os.path.splitext(os.path.basename(os.path.abspath(args.input)))[0]
         self.transparent_crop_dir = os.path.join(self.output_dir, "transparent_crops", self.video_name)
         self.outline_only_dir = os.path.join(self.output_dir, "outline_only", self.video_name)
@@ -677,10 +759,14 @@ class InteractiveSam2Gui:
         # Keep contour thick enough for clear visibility when saving.
         self.outline_thickness = int(max(self._display_distance(3.0), round(min(self.frame_h, self.frame_w) / 520.0)))
         self.existing_track_count = self._count_existing_tracks(self.ytvis_out_path)
-        if self.existing_track_count > 0:
+        self.has_prior_annotation = any(
+            os.path.isfile(os.path.join(self.output_dir, _add_output_version(str(args.ytvis_out), version)))
+            for version in range(1, self.output_version)
+        )
+        if self.output_version > 1:
             print(
-                f"[GUI] Existing annotation file detected "
-                f"({self.existing_track_count} tracks): {self.ytvis_out_path}"
+                f"[GUI] Existing annotation detected; saving this session as version {self.output_version}: "
+                f"{self.ytvis_out_path}"
             )
 
     @staticmethod
@@ -755,7 +841,8 @@ class InteractiveSam2Gui:
         finally:
             cv2.destroyAllWindows()
             self.frame_source.close()
-            self._save_outputs()
+            if not self.final_outputs_saved:
+                self._save_outputs(render_video=True)
 
     def _decode_masks(self, obj_ids: List[int], mask_logits: Any) -> Dict[int, np.ndarray]:
         out: Dict[int, np.ndarray] = {}
@@ -1272,6 +1359,9 @@ class InteractiveSam2Gui:
         step_start = time.perf_counter()
         next_item = self.frame_source.read_next()
         if next_item is None:
+            if not self.final_outputs_saved:
+                print("[GUI] Final frame reached; saving annotation JSON and overlay MP4.")
+                self._save_outputs(render_video=True)
             return False
         frame_load_elapsed = time.perf_counter() - step_start
         self.frame_idx += 1
@@ -2218,9 +2308,65 @@ class InteractiveSam2Gui:
             return
         print(f"[GUI] Saved outline image: {out_path} (thickness={self.outline_thickness}px)")
 
-    def _save_outputs(self, *, force: bool = False) -> None:
+    def _save_annotation_video(self) -> bool:
+        """Export the processed annotation timeline as a mask-overlay MP4."""
+        frame_count = int(max(0, self.track_store.num_frames))
+        if frame_count <= 0:
+            print("[GUI] Annotation MP4 skipped: no processed frames.")
+            return False
+
+        temporary_path = f"{os.path.splitext(self.annotation_video_out_path)[0]}.tmp.mp4"
+        source: Optional[StreamFrameSource] = None
+        writer: Optional[cv2.VideoWriter] = None
+        written = 0
+        try:
+            source = StreamFrameSource(self.args.input, max_frames=frame_count)
+            first = source.read_next()
+            if first is None:
+                print("[GUI] Annotation MP4 skipped: input has no readable frames.")
+                return False
+            first_frame, _ = first
+            height, width = first_frame.shape[:2]
+            fps = float(max(1.0, source.fps))
+            writer = cv2.VideoWriter(
+                temporary_path,
+                cv2.VideoWriter_fourcc(*"mp4v"),
+                fps,
+                (int(width), int(height)),
+            )
+            if not writer.isOpened():
+                raise RuntimeError("OpenCV could not open an MP4 writer (mp4v)")
+
+            frame = first_frame
+            frame_idx = 0
+            while True:
+                writer.write(render_annotation_overlay(frame, self.track_store.masks_at_frame(frame_idx)))
+                written += 1
+                frame_idx += 1
+                item = source.read_next()
+                if item is None:
+                    break
+                frame, _ = item
+            writer.release()
+            writer = None
+            os.replace(temporary_path, self.annotation_video_out_path)
+            print(
+                f"[GUI] Saved annotation overlay MP4: {self.annotation_video_out_path} "
+                f"({written} frames, {fps:g} fps)"
+            )
+            return True
+        except Exception as exc:
+            print(f"[GUI] Annotation MP4 export failed: {exc}")
+            return False
+        finally:
+            if writer is not None:
+                writer.release()
+            if source is not None:
+                source.close()
+
+    def _save_outputs(self, *, force: bool = False, render_video: bool = False) -> None:
         preds = self.track_store.export_predictions(video_id=int(self.args.video_id))
-        if (not force) and len(preds) == 0 and self.existing_track_count > 0:
+        if (not force) and len(preds) == 0 and (self.existing_track_count > 0 or self.has_prior_annotation):
             print(
                 "[GUI][Warn] Current in-memory tracks are empty; "
                 f"keeping existing file unchanged: {self.ytvis_out_path}"
@@ -2234,8 +2380,7 @@ class InteractiveSam2Gui:
         )
         num_object_tracks = int(len(preds) - num_hand_tracks)
 
-        session_name = str(getattr(self.args, "session_meta_out", "interactive_session_meta.json"))
-        session_path = os.path.join(self.output_dir, session_name)
+        session_path = self.session_meta_out_path
         payload = {
             "video_name": self.video_name,
             "input": os.path.abspath(self.args.input),
@@ -2251,7 +2396,11 @@ class InteractiveSam2Gui:
             "ytvis_output": os.path.abspath(self.ytvis_out_path),
             "last_frame_name": self.current_frame_name,
         }
+        if render_video and self._save_annotation_video():
+            payload["annotation_overlay_mp4"] = os.path.abspath(self.annotation_video_out_path)
         _write_json_atomic(session_path, payload)
+        if render_video:
+            self.final_outputs_saved = True
         print(f"[GUI] Saved YTVIS predictions: {self.ytvis_out_path} ({len(preds)} tracks)")
         print(f"[GUI] Saved session metadata: {session_path}")
 
