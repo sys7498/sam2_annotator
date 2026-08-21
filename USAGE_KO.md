@@ -121,7 +121,9 @@ bash scripts/extract_aria_recording_native_fps.sh --all --overwrite
    보정한다. `e`를 한 번 더 누르면 이 모드를 끝낸다. 필요할 때만 `b`로 brush 보정을 사용한다.
 6. 겹치거나 일시적으로 가려진 frame에서는 해당 ID를 선택한 뒤 `f`를 누른다. 이 frame의 mask만
    annotation에서 제거하며, SAM2 메모리와 다음 frame의 track은 유지된다. `d`와 달리 ID를 종료하지 않는다.
-7. `s`로 중간 저장한다. `q` 또는 창 닫기 시에도 자동 저장된다.
+7. 현재 frame에서만 사라진 기존 ID를 다시 넣으려면 `i`를 누르고 ID를 입력한다. 이후 대상 내부를
+   좌클릭하거나 box를 드래그하면 **같은 ID**로 새 mask가 추가된다.
+8. `s`로 중간 저장한다. `q` 또는 창 닫기 시에도 자동 저장된다.
 
 화면의 mask 색, 윤곽선, `id:<번호>` 라벨로 현재 추적 상태를 확인한다. 활성 ID에는 `*`가 붙는다.
 
@@ -147,6 +149,7 @@ bash scripts/extract_aria_recording_native_fps.sh --all --overwrite
 | `[` / `]` | 이전 / 다음 활성 ID 선택 |
 | `n` | 새 object ID 생성 |
 | `h`, `Shift+n` | 새 hand ID 생성 |
+| `i` | 번호를 입력해 현재 frame에 ID를 추가/복원; 이후 좌클릭 또는 box로 mask 시작 |
 | `g` | 창 안에 번호를 입력해 ID 선택 또는 새 ID 생성 |
 | `d` | 창 안에 번호를 입력해 ID 하나 이상 삭제 |
 | `f` | 활성 ID mask를 **현재 frame에서만** 제거; SAM2 메모리·다음 frame은 유지 |

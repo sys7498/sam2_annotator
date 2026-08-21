@@ -1106,7 +1106,10 @@ class InteractiveSam2Gui:
             self.active_obj_id = int(tid)
             existing_kind = self._kind_for_track(int(tid))
             self.active_id_by_kind[existing_kind] = int(tid)
-            self._ensure_active_id()
+            # A known track may be absent only on this frame. Keep it active
+            # so the annotator can restore its mask with a new point or box.
+            # `_ensure_active_id()` would otherwise discard it because it is
+            # not currently listed in `object_ids`.
             print(f"[GUI] Active ID set to existing track: {tid} ({existing_kind})")
             return True
         if not create_if_missing:
@@ -1231,6 +1234,28 @@ class InteractiveSam2Gui:
                 self.prompt_states[track_id] = PromptState()
                 self._close_text_input()
             return
+        if action == "add_current":
+            if track_id < 0:
+                self.text_input_error = "ID must be >= 0."
+                return
+            if self._set_active_object_by_id(track_id, create_if_missing=True):
+                # Re-adding an ID intentionally reverses a prior frame-only
+                # removal (`f`) on this frame. The first positive point/box
+                # below becomes its new mask.
+                suppressed = self.frame_suppressed_masks.get(int(self.frame_idx))
+                if suppressed is not None:
+                    suppressed.pop(int(track_id), None)
+                    if not suppressed:
+                        self.frame_suppressed_masks.pop(int(self.frame_idx), None)
+                self.prompt_states[int(track_id)] = PromptState()
+                self.prompt_edit_mode = False
+                self.prompt_edit_obj_id = None
+                self._close_text_input()
+                print(
+                    f"[GUI] Add ID {track_id} on frame {self.frame_idx + 1}: "
+                    "left-click inside it or drag a box to create its mask."
+                )
+            return
         if action == "mouse_edit":
             if self._begin_mouse_prompt_edit(track_id):
                 self._close_text_input()
@@ -1293,6 +1318,9 @@ class InteractiveSam2Gui:
 
     def _prompt_new_object_id(self) -> None:
         self._open_text_input("new_object", "New object ID")
+
+    def _prompt_add_id_on_current_frame(self) -> None:
+        self._open_text_input("add_current", "Add or restore ID on this frame")
 
     def _ensure_active_id(self) -> None:
         if self.active_obj_id in self.object_ids:
@@ -2009,6 +2037,9 @@ class InteractiveSam2Gui:
         if key == ord("h"):
             self._create_new_active_object(kind="hand")
             return False
+        if key == ord("i"):
+            self._prompt_add_id_on_current_frame()
+            return False
         if key == ord("d"):
             self._prompt_delete_object_id()
             return False
@@ -2224,7 +2255,7 @@ class InteractiveSam2Gui:
                 f"next object: {self.next_obj_id} | next hand: {self.next_hand_id}"
             ),
             mouse_help,
-            "Keys: Space/. next | , previous | n object | h hand | [ ] ID | e prompts | f frame-remove | d delete | s save | q exit",
+            "Keys: Space/. next | , previous | n object | h hand | i add ID here | [ ] ID | e prompts | f frame-remove | d delete | s save | q exit",
             "More: p active prompts | b brush edit | a apply brush | g select | c rename | t crop | o outline",
         ]
         y0 = self._display_distance(30.0)

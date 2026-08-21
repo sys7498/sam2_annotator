@@ -86,7 +86,8 @@ frame 상태를 정리하므로 과거 frame에서 수정하면 해당 frame까�
    완료 파일이 **DONE**, 나머지가 **TODO**로 표시된다.
 2. 왼쪽 클릭은 active ID의 positive point이고, 드래그는 box prompt다. 오른쪽 클릭은 negative point다.
    마우스는 active ID를 선택하거나 바꾸지 않는다.
-3. `n`은 새 object ID, `h`는 새 hand ID, `[`/`]`는 ID 선택, `g`는 번호 입력 선택/생성,
+3. `n`은 새 object ID, `h`는 새 hand ID, `i`는 현재 frame에 다시 넣을 ID를 번호로 지정,
+   `[`/`]`는 ID 선택, `g`는 번호 입력 선택/생성,
    `d`는 전체 ID 삭제, `f`는 현재 frame에서만 active mask 제거, `c`는 ID 변경이다. `f`는
    SAM2 메모리와 이후 frame을 유지하므로 겹침/일시 가림 frame에서 쓴다. ID 입력은 모두 OpenCV 창 안에서 처리된다.
    한 ID를 종료하고 두 ID를 만들면 `1→2 separation`, 두 ID를 종료하고 한 ID를 만들면
@@ -102,7 +103,8 @@ frame 상태를 정리하므로 과거 frame에서 수정하면 해당 frame까�
    `e`는 수정할 ID를 창 안에서 입력한 뒤 영상 위에서 직접 mask를 보정하는 모드다. 이 모드에서
    좌클릭은 positive, 우클릭은 negative prompt이며 `e`를 한 번 더 누르면 종료한다. `p`는
    현재 active ID로 같은 mouse-prompt 모드를 바로 연다. `b`는 brush 보정, `a`는 brush
-   보정 mask 적용, `s`는 저장이다.
+   보정 mask 적용, `s`는 저장이다. 현재 frame에서 사라진 기존 ID는 `i`를 누르고 ID를 입력한 뒤
+   좌클릭 또는 box 드래그로 같은 ID의 mask를 다시 추가한다.
 
 기존 JSON만 있는 결과는 다음으로 overlay MP4를 별도로 만들 수 있다.
 
