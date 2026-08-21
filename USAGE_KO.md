@@ -33,8 +33,8 @@ python desktop_annotator.py --dataset /mnt/c/path/to/videos
 영상 하나를 열 때만 `--dataset` 또는 `--input`을 지정한다.
 annotation 저장 루트는 `/workspace/shared/aria_recording/5fps_sampled_masks`로 고정되어 있다. 다른 경로가
 필요한 경우에만 `--output-dir /path/to/annotations`로 덮어쓴다.
-`--dataset` 실행에서는 입력 데이터셋의 하위 폴더 구조를 유지해
-`/workspace/shared/aria_recording/5fps_sampled_masks/<사람>/<작업>/rgb/`에 결과를 저장한다.
+`--dataset` 실행에서는 입력 데이터셋의 하위 폴더 구조를 유지하고, 작업명 끝의 `_sep`/`_join`을 읽어
+`/workspace/shared/aria_recording/5fps_sampled_masks/<sep|join>/<사람>/<작업>/rgb/`에 결과를 저장한다.
 결과는 입력과 분리되어 `/workspace/shared/aria_recording/5fps_sampled_masks/<입력_이름>/` 아래에 저장된다.
 마지막 frame에서 `Space`를 한 번 더 누르거나 작업을 `q`/창 닫기로 끝내면 해당 mask를 겹쳐 그린
 `annotation_overlay.mp4` 렌더링이 백그라운드에서 시작되어 다음 영상 선택 화면으로 즉시 돌아간다.
@@ -45,7 +45,7 @@ annotation 저장 루트는 `/workspace/shared/aria_recording/5fps_sampled_masks
 
 `--dataset`은 하위 폴더를 재귀적으로 탐색한다. 따라서
 `raw/<사람>/<작업>/rgb.mp4`처럼 중간 폴더가 추가돼도 자동으로 찾고,
-결과도 `/workspace/shared/aria_recording/5fps_sampled_masks/<사람>/<작업>/rgb/`로 분리되어 같은
+결과도 `/workspace/shared/aria_recording/5fps_sampled_masks/<sep|join>/<사람>/<작업>/rgb/`로 분리되어 같은
 `rgb.mp4` 파일명이 충돌하지 않는다.
 
 기존 JSON 결과에 MP4만 추가로 만들려면 다음을 실행한다.
@@ -53,7 +53,7 @@ annotation 저장 루트는 `/workspace/shared/aria_recording/5fps_sampled_masks
 ```bash
 python scripts/export_annotation_overlay_mp4.py \
   --input /workspace/shared/aria_recording/5fps_sampled_sequences/<사람>/<작업>/rgb \
-  --annotations /workspace/shared/aria_recording/5fps_sampled_masks/<사람>/<작업>/rgb/annotations_ytvis.json
+  --annotations /workspace/shared/aria_recording/5fps_sampled_masks/<sep|join>/<사람>/<작업>/rgb/annotations_ytvis.json
 ```
 
 ## Aria raw 영상 5fps 프레임 추출
@@ -196,7 +196,7 @@ relation이 생성되지 않는다.
 각 입력은 다음 경로에 저장된다.
 
 ```text
-/workspace/shared/aria_recording/5fps_sampled_masks/<입력_이름>/
+/workspace/shared/aria_recording/5fps_sampled_masks/<sep|join>/<사람>/<작업>/rgb/
 ├── annotations_ytvis.json
 ├── interactive_session_meta.json
 ├── lineage_relations.json

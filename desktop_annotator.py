@@ -472,7 +472,23 @@ def _outputs_for(
     if key is None:
         key = Path(input_path.stem if input_path.is_file() else input_path.name)
     key = key.with_suffix("") if key.suffix else key
-    out_dir = output_root.joinpath(*key.parts)
+
+    # Aria sequence names end in ``_sep`` or ``_join``. Keep the event type
+    # at the top of the annotation tree for event-level review/export.
+    # A direct --input uses its source path because its output key is ``rgb``.
+    event_type = None
+    for part in reversed((relative_input or input_path).parts):
+        normalized_name = Path(part).stem.lower()
+        if normalized_name.endswith("_sep"):
+            event_type = "sep"
+            break
+        if normalized_name.endswith("_join"):
+            event_type = "join"
+            break
+    if event_type:
+        out_dir = output_root.joinpath(event_type, *key.parts)
+    else:
+        out_dir = output_root.joinpath(*key.parts)
     return out_dir, "annotations_ytvis.json", "interactive_session_meta.json"
 
 
