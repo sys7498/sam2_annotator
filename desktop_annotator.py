@@ -26,6 +26,7 @@ DEFAULT_OUTPUT_ROOT = Path("/workspace/shared/aria_recording/5fps_sampled_masks"
 NATIVE_UI_ROOT = PROJECT_ROOT / "native_ui"
 SAM2_ROOT = PROJECT_ROOT / "vendor" / "sam2_realtime"
 VIDEO_EXTENSIONS = {".mp4", ".avi", ".mov", ".mkv", ".webm", ".mpeg", ".mpg", ".m4v"}
+LINEAGE_GRAPH_RENDERER = "topology-v3-event-time"
 
 
 @dataclass
@@ -33,6 +34,13 @@ class _PendingPredecessor:
     track_id: int
     frame_idx: int
     last_visible_frame: int
+
+
+@dataclass
+class _PersistedTrackStore:
+    """Minimal track-store view reconstructed from an exported YTVIS JSON."""
+
+    tracks: dict[int, dict[str, Any]]
 
 
 @dataclass
@@ -175,6 +183,7 @@ class _LineageRecorder:
     def payload(self) -> dict[str, Any]:
         return {
             "schema_version": "1.0",
+            "graph_renderer": LINEAGE_GRAPH_RENDERER,
             "relation_direction": "predecessor_to_successor",
             "auto_rule": {
                 "separation": "one explicit object-ID deletion plus exactly two new object IDs within 12 frames",
@@ -522,6 +531,76 @@ def _render_lineage_graph(
     temporary_path.replace(output_path)
 
 
+def _refresh_saved_lineage_graph(
+    output_dir: Path,
+    *,
+    ytvis_name: str = "annotations_ytvis.json",
+    session_name: str = "interactive_session_meta.json",
+    object_category_id: int = 1,
+) -> bool:
+    """Re-render an existing result bundle with this source's graph renderer."""
+    annotations_path = output_dir / ytvis_name
+    relations_path = output_dir / "lineage_relations.json"
+    if not annotations_path.is_file() or not relations_path.is_file():
+        return False
+
+    try:
+        with annotations_path.open("r", encoding="utf-8") as handle:
+            annotations = json.load(handle)
+        with relations_path.open("r", encoding="utf-8") as handle:
+            relation_payload = json.load(handle)
+        if not isinstance(annotations, list) or not isinstance(relation_payload, dict):
+            return False
+
+        tracks: dict[int, dict[str, Any]] = {}
+        for annotation in annotations:
+            if not isinstance(annotation, dict) or "track_id" not in annotation:
+                continue
+            segmentations = annotation.get("segmentations", [])
+            if not isinstance(segmentations, list):
+                continue
+            tracks[int(annotation["track_id"])] = {
+                "category_id": int(annotation.get("category_id", object_category_id)),
+                "frames": {
+                    frame_idx: {}
+                    for frame_idx, segmentation in enumerate(segmentations)
+                    if segmentation is not None
+                },
+            }
+        relations = relation_payload.get("relations", [])
+        if not isinstance(relations, list):
+            relations = []
+        pending = [
+            _PendingPredecessor(
+                track_id=int(item["track_id"]),
+                frame_idx=int(item["frame_idx"]),
+                last_visible_frame=int(item["last_visible_frame"]),
+            )
+            for item in relation_payload.get("pending_predecessors", [])
+            if isinstance(item, dict)
+            and {"track_id", "frame_idx", "last_visible_frame"}.issubset(item)
+        ]
+        processed_frames = 0
+        session_path = output_dir / session_name
+        if session_path.is_file():
+            with session_path.open("r", encoding="utf-8") as handle:
+                session = json.load(handle)
+            if isinstance(session, dict):
+                processed_frames = int(session.get("num_frames_processed", 0) or 0)
+        _render_lineage_graph(
+            output_dir / "lineage_graph.png",
+            track_store=_PersistedTrackStore(tracks),
+            relations=relations,
+            pending=pending,
+            object_category_id=int(object_category_id),
+            processed_frames=processed_frames,
+        )
+        return True
+    except Exception as exc:
+        print(f"[Lineage] Existing graph refresh skipped for {output_dir}: {exc}")
+        return False
+
+
 def _require(path: Path, label: str) -> None:
     if not path.exists():
         raise RuntimeError(f"{label} not found: {path}")
@@ -553,6 +632,16 @@ def _make_lineage_gui_class(gui):
         def __init__(self, args) -> None:
             self.lineage = _LineageRecorder()
             super().__init__(args)
+            # A result might have been saved by an earlier program version.
+            # Refresh it as soon as the sequence is opened, so inspecting a
+            # completed item never shows a stale graph layout.
+            if _refresh_saved_lineage_graph(
+                Path(self.output_dir),
+                ytvis_name=str(self.args.ytvis_out),
+                session_name=str(getattr(self.args, "session_meta_out", "interactive_session_meta.json")),
+                object_category_id=int(self.args.category_id),
+            ):
+                print(f"[Lineage] Refreshed existing graph with {LINEAGE_GRAPH_RENDERER}.")
 
         def _delete_object_by_id(self, obj_id: int) -> None:
             track_id = int(obj_id)
@@ -657,6 +746,7 @@ def _make_lineage_gui_class(gui):
                 session["auto_relation_count"] = len(self.lineage.relations)
                 if graph_saved:
                     session["lineage_graph"] = str(graph_path.resolve())
+                    session["lineage_graph_renderer"] = LINEAGE_GRAPH_RENDERER
                 temporary_session = session_path.with_suffix(".json.tmp")
                 with temporary_session.open("w", encoding="utf-8") as handle:
                     json.dump(session, handle, ensure_ascii=False, indent=2)
@@ -666,7 +756,7 @@ def _make_lineage_gui_class(gui):
 
             print(f"[Lineage] Saved relations: {relation_path} ({len(self.lineage.relations)} confirmed)")
             if graph_saved:
-                print(f"[Lineage] Saved graph: {graph_path}")
+                print(f"[Lineage] Saved graph ({LINEAGE_GRAPH_RENDERER}): {graph_path}")
             return True
 
     return LineageInteractiveSam2Gui
