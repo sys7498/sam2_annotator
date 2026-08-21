@@ -237,53 +237,33 @@ def _render_lineage_topology_graph(
                 graph.add_edge(parent_id, child_id)
                 edge_type[(parent_id, child_id)] = relation_type
 
-    nodes_by_level: dict[int, List[int]] = {}
-    for track_id in track_ids:
-        nodes_by_level.setdefault(level_for_id[track_id], []).append(track_id)
-    for node_ids in nodes_by_level.values():
-        node_ids.sort(key=lambda track_id: (spans[track_id][0], track_id))
-
-    def alternate_slot(index: int) -> int:
-        if index == 0:
-            return 0
-        offset = (index + 1) // 2
-        return offset if index % 2 else -offset
-
-    y_raw: dict[int, float] = {}
-    roots = nodes_by_level.get(0, [])
-    for index, track_id in enumerate(roots):
-        y_raw[track_id] = float(alternate_slot(index) * 2.8)
-    for level in sorted(nodes_by_level):
-        if level == 0:
-            continue
-        for track_id in nodes_by_level[level]:
-            parents = list(graph.predecessors(track_id))
-            if parents:
-                y_raw[track_id] = sum(y_raw[parent_id] for parent_id in parents) / len(parents)
-            else:
-                y_raw[track_id] = 0.0
-
-    # Separate nodes that share one layer but retain their parent-centred order.
-    y_final: dict[int, float] = {}
-    for level, node_ids in nodes_by_level.items():
-        ordered = sorted(node_ids, key=lambda track_id: (y_raw[track_id], track_id))
-        placed: List[tuple[int, float]] = []
-        previous_y: float | None = None
-        for track_id in ordered:
-            y_value = y_raw[track_id]
-            if previous_y is not None and y_value - previous_y < 1.6:
-                y_value = previous_y + 1.6
-            placed.append((track_id, y_value))
-            previous_y = y_value
-        if placed:
-            target_center = sum(y_raw[track_id] for track_id, _ in placed) / len(placed)
-            placed_center = sum(y_value for _, y_value in placed) / len(placed)
-            for track_id, y_value in placed:
-                y_final[track_id] = y_value + target_center - placed_center
-
-    y_center = sum(y_final.values()) / len(y_final)
+    # The vertical order follows structural-event time, not arbitrary ID order.
+    # At one event, predecessors are placed before the successor so each
+    # joining/separation can be read from top to bottom in temporal order.
+    event_order: dict[int, tuple[int, int]] = {
+        track_id: (10**9, 2) for track_id in track_ids
+    }
+    for relation in sorted(relations, key=lambda item: int(item.get("frame_idx", 0))):
+        frame_idx = int(relation.get("frame_idx", 0))
+        for track_id in relation.get("predecessor_ids", []):
+            track_id = int(track_id)
+            event_order[track_id] = min(event_order[track_id], (frame_idx, 0))
+        for track_id in relation.get("successor_ids", []):
+            track_id = int(track_id)
+            event_order[track_id] = min(event_order[track_id], (frame_idx, 1))
+    vertical_order = sorted(
+        track_ids,
+        key=lambda track_id: (
+            event_order[track_id][0],
+            event_order[track_id][1],
+            spans[track_id][0],
+            track_id,
+        ),
+    )
+    vertical_rank = {track_id: index for index, track_id in enumerate(vertical_order)}
+    vertical_center = (len(track_ids) - 1) / 2.0
     positions = {
-        track_id: (float(level_for_id[track_id]), -0.42 * (y_final[track_id] - y_center))
+        track_id: (float(level_for_id[track_id]), -0.70 * (vertical_rank[track_id] - vertical_center))
         for track_id in track_ids
     }
     max_level = max(level_for_id.values())
