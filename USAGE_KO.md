@@ -128,6 +128,23 @@ bash scripts/sample_aria_frames_10fps.sh --all --dry-run
 JPEG는 원본과 하드링크로 연결된다. 어노테이션 작업은 프레임을 수정하지 않으므로 저장 공간을
 중복 사용하지 않으며, 원본을 삭제하거나 수정하면 안 된다.
 
+## 특정 5fps 프레임부터 clip 다시 만들기
+
+이미 만든 5fps sequence의 특정 frame을 새 첫 frame으로 정할 때는 아래 스크립트를 사용한다.
+VRS는 capture provenance로 유지하고, raw RGB MP4·RGB timestamp·hand sidecar·30fps/5fps/10fps
+JPEG·배포용 영상·빈 annotation 결과를 동일한 시작 시점으로 다시 만든다.
+
+```bash
+python scripts/trim_aria_sequence_from_5fps_start.py \
+  --participant lsj \
+  --sequence lsj_humidifier_join \
+  --start-5fps-index 7
+```
+
+변환은 임시 경로에서 검증한 후에만 교체한다. 이전 데이터는 각 대상의
+`history/pretrim_<UTC timestamp>/`에 보관된다. 이미 mask가 있는 sequence에는 실행하지 말고,
+annotation JSON의 frame index 변환 여부를 먼저 검토해야 한다.
+
 ## 2. 기본 작업 흐름
 
 1. 첫 프레임에서 `n`으로 새 object ID를 만든다.

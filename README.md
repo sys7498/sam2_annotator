@@ -52,6 +52,15 @@ bash scripts/extract_aria_recording_native_fps.sh --all
 bash scripts/sample_aria_frames_10fps.sh --all
 ```
 
+특정 5fps frame을 새 clip의 첫 frame으로 삼아 raw sidecar와 모든 sampled
+sequence를 함께 다시 만들 때는 다음을 사용한다. VRS와 원래 postprocess 로그는
+보존하고, 교체 전 결과는 각 디렉터리의 `history/pretrim_.../`에 보관한다.
+
+```bash
+python scripts/trim_aria_sequence_from_5fps_start.py \
+  --participant lsj --sequence lsj_humidifier_join --start-5fps-index 7
+```
+
 ## 실행
 
 ```bash
