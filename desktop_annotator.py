@@ -199,6 +199,184 @@ def _track_color(track_id: int) -> tuple[int, int, int]:
     return int(bgr[0]), int(bgr[1]), int(bgr[2])
 
 
+def _render_lineage_topology_graph(
+    output_path: Path,
+    *,
+    spans: dict[int, List[int]],
+    relations: List[dict[str, Any]],
+) -> None:
+    """Render a clean left-to-right lineage DAG with NetworkX/Matplotlib."""
+    import matplotlib
+
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from matplotlib.lines import Line2D
+    import networkx as nx
+
+    track_ids = sorted(spans, key=lambda track_id: (spans[track_id][0], track_id))
+    graph = nx.DiGraph()
+    graph.add_nodes_from(track_ids)
+    level_for_id = {track_id: 0 for track_id in track_ids}
+    edge_type: dict[tuple[int, int], str] = {}
+    joining_children: set[int] = set()
+    review_ids: set[int] = set()
+
+    for relation in sorted(relations, key=lambda item: int(item.get("frame_idx", 0))):
+        parent_ids = [int(track_id) for track_id in relation.get("predecessor_ids", [])]
+        child_ids = [int(track_id) for track_id in relation.get("successor_ids", [])]
+        relation_type = str(relation.get("type", "relation"))
+        status = str(relation.get("status", "auto"))
+        child_level = max(level_for_id[parent_id] for parent_id in parent_ids) + 1
+        for child_id in child_ids:
+            level_for_id[child_id] = max(level_for_id[child_id], child_level)
+            if relation_type == "joining":
+                joining_children.add(child_id)
+            if status != "auto":
+                review_ids.add(child_id)
+            for parent_id in parent_ids:
+                graph.add_edge(parent_id, child_id)
+                edge_type[(parent_id, child_id)] = relation_type
+
+    nodes_by_level: dict[int, List[int]] = {}
+    for track_id in track_ids:
+        nodes_by_level.setdefault(level_for_id[track_id], []).append(track_id)
+    for node_ids in nodes_by_level.values():
+        node_ids.sort(key=lambda track_id: (spans[track_id][0], track_id))
+
+    def alternate_slot(index: int) -> int:
+        if index == 0:
+            return 0
+        offset = (index + 1) // 2
+        return offset if index % 2 else -offset
+
+    y_raw: dict[int, float] = {}
+    roots = nodes_by_level.get(0, [])
+    for index, track_id in enumerate(roots):
+        y_raw[track_id] = float(alternate_slot(index) * 2.8)
+    for level in sorted(nodes_by_level):
+        if level == 0:
+            continue
+        for track_id in nodes_by_level[level]:
+            parents = list(graph.predecessors(track_id))
+            if parents:
+                y_raw[track_id] = sum(y_raw[parent_id] for parent_id in parents) / len(parents)
+            else:
+                y_raw[track_id] = 0.0
+
+    # Separate nodes that share one layer but retain their parent-centred order.
+    y_final: dict[int, float] = {}
+    for level, node_ids in nodes_by_level.items():
+        ordered = sorted(node_ids, key=lambda track_id: (y_raw[track_id], track_id))
+        placed: List[tuple[int, float]] = []
+        previous_y: float | None = None
+        for track_id in ordered:
+            y_value = y_raw[track_id]
+            if previous_y is not None and y_value - previous_y < 1.6:
+                y_value = previous_y + 1.6
+            placed.append((track_id, y_value))
+            previous_y = y_value
+        if placed:
+            target_center = sum(y_raw[track_id] for track_id, _ in placed) / len(placed)
+            placed_center = sum(y_value for _, y_value in placed) / len(placed)
+            for track_id, y_value in placed:
+                y_final[track_id] = y_value + target_center - placed_center
+
+    y_center = sum(y_final.values()) / len(y_final)
+    positions = {
+        track_id: (float(level_for_id[track_id]), -0.42 * (y_final[track_id] - y_center))
+        for track_id in track_ids
+    }
+    max_level = max(level_for_id.values())
+    y_values = [point[1] for point in positions.values()]
+    figure_width = min(15.0, max(8.0, 2.0 * (max_level + 2)))
+    figure_height = min(8.5, max(4.8, max(y_values) - min(y_values) + 2.7))
+    figure, axis = plt.subplots(figsize=(figure_width, figure_height), facecolor="white")
+    axis.set_facecolor("white")
+    figure.subplots_adjust(left=0.06, right=0.98, top=0.84, bottom=0.14)
+
+    node_colors = ["#ff7f0e" if track_id in joining_children else "#2f73e8" for track_id in track_ids]
+    node_edges = ["#d62728" if track_id in review_ids else "#202020" for track_id in track_ids]
+    nx.draw_networkx_nodes(
+        graph,
+        positions,
+        nodelist=track_ids,
+        node_size=1700,
+        node_color=node_colors,
+        edgecolors=node_edges,
+        linewidths=2.0,
+        ax=axis,
+    )
+    separation_edges = [edge for edge, relation_type in edge_type.items() if relation_type == "separation"]
+    joining_edges = [edge for edge, relation_type in edge_type.items() if relation_type == "joining"]
+    if separation_edges:
+        nx.draw_networkx_edges(
+            graph,
+            positions,
+            edgelist=separation_edges,
+            edge_color="#2f73e8",
+            width=2.4,
+            arrows=True,
+            arrowstyle="-|>",
+            arrowsize=18,
+            connectionstyle="arc3,rad=0.08",
+            min_source_margin=22,
+            min_target_margin=22,
+            ax=axis,
+        )
+    if joining_edges:
+        nx.draw_networkx_edges(
+            graph,
+            positions,
+            edgelist=joining_edges,
+            edge_color="#ff7f0e",
+            width=2.6,
+            arrows=True,
+            arrowstyle="-|>",
+            arrowsize=18,
+            connectionstyle="arc3,rad=0.08",
+            min_source_margin=22,
+            min_target_margin=22,
+            ax=axis,
+        )
+    nx.draw_networkx_labels(
+        graph,
+        positions,
+        labels={track_id: str(track_id) for track_id in track_ids},
+        font_color="white",
+        font_size=9,
+        font_weight="bold",
+        ax=axis,
+    )
+    review_count = sum(1 for relation in relations if relation.get("status") != "auto")
+    figure.suptitle("Structural lineage graph", x=0.06, y=0.975, ha="left", fontsize=15, fontweight="bold")
+    figure.text(
+        0.06,
+        0.925,
+        f"saved IDs: {len(track_ids)}   events: {len(relations)}   needs review: {review_count}",
+        fontsize=8.5,
+        color="#555555",
+    )
+    figure.legend(
+        handles=[
+            Line2D([0], [0], color="#2f73e8", lw=2.4, label="separation / source"),
+            Line2D([0], [0], color="#ff7f0e", lw=2.6, label="joining"),
+            Line2D([0], [0], marker="o", color="w", markerfacecolor="#ff7f0e", markeredgecolor="#d62728", markersize=9, label="red border: needs review"),
+        ],
+        loc="lower left",
+        bbox_to_anchor=(0.06, 0.025),
+        frameon=False,
+        fontsize=8,
+        ncol=3,
+    )
+    axis.set_axis_off()
+    axis.margins(0.12)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_path = output_path.with_name(f"{output_path.stem}.tmp.png")
+    figure.savefig(temporary_path, dpi=150, facecolor="white")
+    plt.close(figure)
+    temporary_path.replace(output_path)
+
+
 def _render_lineage_graph(
     output_path: Path,
     *,
@@ -244,10 +422,21 @@ def _render_lineage_graph(
         temporary_path.replace(output_path)
         return
 
+    try:
+        _render_lineage_topology_graph(
+            output_path,
+            spans=spans,
+            relations=visible_relations,
+        )
+        return
+    except ImportError as exc:
+        print(f"[Lineage] Matplotlib graph unavailable ({exc}); using OpenCV fallback.")
+
     # Place each saved ID in a left-to-right lineage layer. This deliberately
     # omits the dense per-frame timeline: the final PNG is a relationship graph
     # meant for quick structural review.
     relation_edges: List[tuple[int, int, str, str]] = []
+    parents_for_child: dict[int, set[int]] = {track_id: set() for track_id in track_ids}
     incoming_ids: set[int] = set()
     joining_children: set[int] = set()
     review_ids: set[int] = set()
@@ -266,6 +455,7 @@ def _render_lineage_graph(
             if status != "auto":
                 review_ids.add(child_id)
             for parent_id in parent_ids:
+                parents_for_child[child_id].add(parent_id)
                 relation_edges.append((parent_id, child_id, relation_type, status))
 
     columns: dict[int, List[int]] = {}
@@ -281,9 +471,30 @@ def _render_lineage_graph(
     height = max(360, top + max_rows * row_height + 105)
     canvas = np.full((height, width, 3), (250, 250, 250), dtype=np.uint8)
     positions: dict[int, tuple[int, int]] = {}
-    for layer, node_ids in columns.items():
-        for row, track_id in enumerate(node_ids):
-            positions[track_id] = (left + layer * column_width, top + row * row_height)
+    bottom = height - 88
+    for layer in range(max_layer + 1):
+        node_ids = columns.get(layer, [])
+        if layer == 0:
+            for row, track_id in enumerate(node_ids):
+                positions[track_id] = (left, top + row * row_height)
+            continue
+
+        desired_positions = []
+        for track_id in node_ids:
+            parent_positions = [positions[parent_id][1] for parent_id in parents_for_child[track_id]]
+            desired_y = sum(parent_positions) / len(parent_positions) if parent_positions else top
+            desired_positions.append((desired_y, track_id))
+        desired_positions.sort()
+
+        placed: List[tuple[int, int]] = []
+        previous_y = top - row_height
+        for desired_y, track_id in desired_positions:
+            y = max(int(round(desired_y)), previous_y + row_height)
+            placed.append((y, track_id))
+            previous_y = y
+        overflow = max(0, placed[-1][0] - bottom) if placed else 0
+        for y, track_id in placed:
+            positions[track_id] = (left + layer * column_width, y - overflow)
 
     text_color = (35, 35, 35)
     blue = (235, 120, 35)
