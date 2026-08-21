@@ -551,38 +551,17 @@ def _make_args(
     )
 
 
-def _discover_dataset_inputs(
-    gui,
-    base_dir: Path,
-    event_filter: str = "join",
-) -> List[tuple[Path, Path]]:
-    """Find videos recursively and image-frame sequences without name collisions.
-
-    For example, ``raw/jdh/jdh_cups_join/rgb.mp4`` is returned with its
-    complete relative path. Its annotations therefore go under
-    ``annotations/jdh/jdh_cups_join/rgb/`` rather than colliding with another
-    participant's ``rgb.mp4``.
-    """
+def _discover_dataset_inputs(gui, base_dir: Path) -> List[tuple[Path, Path]]:
+    """Find only image-frame sequence directories named ``rgb`` recursively."""
     found: List[tuple[Path, Path]] = []
     for root_text, dir_names, file_names in os.walk(base_dir):
         root = Path(root_text)
         dir_names[:] = sorted(name for name in dir_names if not name.startswith("."))
         visible_files = sorted(name for name in file_names if not name.startswith("."))
-        for name in visible_files:
-            path = root / name
-            relative_path = path.relative_to(base_dir)
-            if path.suffix.lower() in VIDEO_EXTENSIONS and (
-                event_filter == "all" or _event_type_from_parts(relative_path.parts) == event_filter
-            ):
-                found.append((path, relative_path))
-
-        # A directory containing image files is one frame sequence. Do not
-        # also offer every individual image as a separate dataset item.
         image_files = [name for name in visible_files if gui._is_image_file(name)]
-        if image_files:
+        if root.name.lower() == "rgb" and image_files:
             relative_path = root.relative_to(base_dir)
-            if event_filter == "all" or _event_type_from_parts(relative_path.parts) == event_filter:
-                found.append((root, relative_path))
+            found.append((root, relative_path))
             dir_names[:] = []
 
     return sorted(found, key=lambda item: str(item[1]).lower())
@@ -638,13 +617,7 @@ def parse_args() -> argparse.Namespace:
     group.add_argument(
         "--dataset",
         type=Path,
-        help="Folder searched recursively for videos/frame-directories; opens a TODO/DONE picker",
-    )
-    parser.add_argument(
-        "--event",
-        choices=("join", "sep", "all"),
-        default="join",
-        help="Event type shown in the dataset picker",
+        help="Folder searched recursively for rgb frame directories; opens a TODO/DONE picker",
     )
     parser.add_argument("--pick", action="store_true", help="Open the operating system file picker")
     parser.add_argument(
@@ -681,7 +654,7 @@ def main() -> None:
             options.input = Path(picked)
     if options.input is None and options.dataset is None:
         options.dataset = DEFAULT_DATASET_ROOT
-        print(f"[Launcher] Default dataset: {options.dataset} (event: {options.event})")
+        print(f"[Launcher] Default dataset: {options.dataset}")
 
     gui = _load_gui_module()
     gui.LineageInteractiveSam2Gui = _make_lineage_gui_class(gui)
@@ -691,7 +664,7 @@ def main() -> None:
             raise SystemExit(f"Dataset folder not found: {base}")
         args_list = [
             _make_args(gui, input_path, options, relative_input)
-            for input_path, relative_input in _discover_dataset_inputs(gui, base, options.event)
+            for input_path, relative_input in _discover_dataset_inputs(gui, base)
         ]
         _run_picker(gui, args_list, Path(options.output_dir))
         return

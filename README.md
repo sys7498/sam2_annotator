@@ -47,7 +47,7 @@ bash scripts/extract_aria_recording_native_fps.sh --all
 ## 실행
 
 ```bash
-# 기본: 5fps Aria 데이터셋의 joining TODO/DONE 선택 화면 열기
+# 기본: 5fps Aria 데이터셋 아래의 rgb frame 폴더 선택 화면 열기
 python desktop_annotator.py
 
 # OS 파일 탐색기로 영상 하나 선택
@@ -56,17 +56,13 @@ python desktop_annotator.py --pick
 # 경로를 바로 지정
 python desktop_annotator.py --input /path/to/video.mp4
 
-# 기본 데이터셋 대신 다른 폴더의 영상 목록에서 TODO/DONE을 보고 선택
-python desktop_annotator.py --dataset /path/to/videos
-
-# separation 또는 전체 목록이 필요할 때만 명시
-python desktop_annotator.py --event sep
-python desktop_annotator.py --event all
+# joining만 작업: join 폴더 아래의 rgb/만 재귀적으로 표시
+python desktop_annotator.py --dataset /workspace/shared/aria_recording/split/join
 ```
 
 입력 dataset은 `/workspace/shared/aria_recording/5fps_sampled_sequences`로 고정되어 있다. 다른 데이터셋을
-열어야 할 때만 `--dataset /path/to/videos` 또는 `--input /path/to/video.mp4`를 사용한다. Dataset 선택 목록은
-기본적으로 `_join` 작업만 보여 준다. `--event sep` 또는 `--event all`로 목록을 바꿀 수 있다.
+열어야 할 때만 `--dataset /path/to/folder` 또는 `--input /path/to/video.mp4`를 사용한다. `--dataset`은 지정한
+폴더 아래를 재귀적으로 탐색하되 이미지가 들어 있는 `rgb/` 폴더만 작업 목록에 표시한다.
 결과 루트는 `/workspace/shared/aria_recording/5fps_sampled_masks`로 고정되어 있다. 다른 위치가 꼭 필요할 때만
 `--output-dir /path/to/annotations`로 덮어쓸 수 있다. Dataset 입력은
 입력 폴더의 하위 구조를 보존하며, 작업명이 `_sep` 또는 `_join`이면 최상위 이벤트 폴더로도 분류해
