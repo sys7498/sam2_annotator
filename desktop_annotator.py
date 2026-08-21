@@ -208,7 +208,7 @@ def _render_lineage_graph(
     object_category_id: int,
     processed_frames: int,
 ) -> None:
-    """Render an inspectable object-ID timeline and structural-event graph."""
+    """Render saved object IDs and their structural-event graph."""
     tracks = getattr(track_store, "tracks", {})
     spans: dict[int, List[int]] = {}
     for track_id, track in tracks.items():
@@ -221,17 +221,33 @@ def _render_lineage_graph(
         if indices:
             spans[int(track_id)] = indices
 
-    related_ids = {
-        int(track_id)
-        for relation in relations
-        for track_id in list(relation.get("predecessor_ids", [])) + list(relation.get("successor_ids", []))
-    }
-    related_ids.update(int(item.track_id) for item in pending)
-    track_ids = sorted(set(spans) | related_ids)
+    # Do not show a transient ID which never produced a saved mask. A relation
+    # is shown only when every endpoint survived in the final annotation.
+    track_ids = sorted(spans, key=lambda track_id: (spans[track_id][0], track_id))
+    saved_ids = set(track_ids)
+    visible_relations: List[dict[str, Any]] = []
+    for relation in relations:
+        parent_ids = [int(track_id) for track_id in relation.get("predecessor_ids", [])]
+        child_ids = [int(track_id) for track_id in relation.get("successor_ids", [])]
+        if parent_ids and child_ids and set(parent_ids + child_ids).issubset(saved_ids):
+            visible_relations.append(relation)
+    visible_pending = [item for item in pending if int(item.track_id) in saved_ids]
+
+    if not track_ids:
+        canvas = np.full((280, 1200, 3), (24, 28, 34), dtype=np.uint8)
+        cv2.putText(canvas, "Structural lineage graph", (30, 52), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (245, 245, 245), 2, cv2.LINE_AA)
+        cv2.putText(canvas, "No saved object masks in the final annotation.", (30, 108), cv2.FONT_HERSHEY_SIMPLEX, 0.65, (195, 210, 225), 1, cv2.LINE_AA)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary_path = output_path.with_name(f"{output_path.stem}.tmp.png")
+        if not cv2.imwrite(str(temporary_path), canvas):
+            raise RuntimeError(f"Failed to write lineage graph: {temporary_path}")
+        temporary_path.replace(output_path)
+        return
+
     max_frame = max(
         [max(indices) for indices in spans.values()]
-        + [int(relation.get("frame_idx", 0)) for relation in relations]
-        + [int(item.frame_idx) for item in pending]
+        + [int(relation.get("frame_idx", 0)) for relation in visible_relations]
+        + [int(item.frame_idx) for item in visible_pending]
         + [max(0, int(processed_frames) - 1)]
     )
     left, right, top, row_height = 220, 70, 125, 54
@@ -244,11 +260,11 @@ def _render_lineage_graph(
         return int(left + round(plot_width * int(frame_idx) / max(1, max_frame)))
 
     row_for_id = {track_id: top + index * row_height + 20 for index, track_id in enumerate(track_ids)}
-    cv2.putText(canvas, "Structural lineage timeline", (22, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (245, 245, 245), 2, cv2.LINE_AA)
-    review_count = sum(1 for relation in relations if relation.get("status") != "auto")
+    cv2.putText(canvas, "Structural lineage graph", (22, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (245, 245, 245), 2, cv2.LINE_AA)
+    review_count = sum(1 for relation in visible_relations if relation.get("status") != "auto")
     summary = (
-        f"object tracks: {len(track_ids)} | relations: {len(relations)} | "
-        f"needs review: {review_count} | unresolved endings: {len(pending)}"
+        f"saved mask IDs: {len(track_ids)} | relations: {len(visible_relations)} | "
+        f"needs review: {review_count} | unresolved endings: {len(visible_pending)}"
     )
     cv2.putText(canvas, summary, (22, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (195, 210, 225), 1, cv2.LINE_AA)
     cv2.putText(canvas, "frame", (left, 98), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (170, 185, 200), 1, cv2.LINE_AA)
@@ -280,24 +296,27 @@ def _render_lineage_graph(
                 segment_start = int(frame)
                 previous = int(frame)
 
-    for relation in relations:
+    for relation in visible_relations:
         frame = int(relation.get("frame_idx", 0))
         x = x_at(frame)
         status = str(relation.get("status", "auto"))
         relation_type = str(relation.get("type", "relation"))
         color = (74, 215, 95) if status == "auto" else (55, 75, 255)
-        cv2.line(canvas, (x, top - 15), (x, height - 55), color, 1, cv2.LINE_AA)
-        cv2.putText(canvas, "S" if relation_type == "separation" else "J", (x - 6, top - 24), cv2.FONT_HERSHEY_SIMPLEX, 0.6, color, 2, cv2.LINE_AA)
-        for parent_id in relation.get("predecessor_ids", []):
-            parent_y = row_for_id.get(int(parent_id))
-            if parent_y is None:
-                continue
-            for child_id in relation.get("successor_ids", []):
-                child_y = row_for_id.get(int(child_id))
-                if child_y is not None:
-                    cv2.arrowedLine(canvas, (x - 15, parent_y), (x + 16, child_y), color, 2, cv2.LINE_AA, tipLength=0.22)
+        parent_ids = [int(track_id) for track_id in relation.get("predecessor_ids", [])]
+        child_ids = [int(track_id) for track_id in relation.get("successor_ids", [])]
+        event_y = int(round(sum(row_for_id[track_id] for track_id in parent_ids + child_ids) / len(parent_ids + child_ids)))
+        for parent_id in parent_ids:
+            parent_frame = min(frame, spans[parent_id][-1])
+            cv2.arrowedLine(canvas, (x_at(parent_frame), row_for_id[parent_id]), (x - 18, event_y), color, 2, cv2.LINE_AA, tipLength=0.16)
+        for child_id in child_ids:
+            child_frame = max(frame, spans[child_id][0])
+            cv2.arrowedLine(canvas, (x + 18, event_y), (x_at(child_frame), row_for_id[child_id]), color, 2, cv2.LINE_AA, tipLength=0.16)
+        cv2.circle(canvas, (x, event_y), 19, (24, 28, 34), -1, cv2.LINE_AA)
+        cv2.circle(canvas, (x, event_y), 19, color, 2, cv2.LINE_AA)
+        label = "SEP" if relation_type == "separation" else "JOIN"
+        cv2.putText(canvas, label, (x - 17, event_y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.36, color, 1, cv2.LINE_AA)
 
-    for item in pending:
+    for item in visible_pending:
         y = row_for_id.get(int(item.track_id))
         if y is None:
             continue
@@ -305,7 +324,7 @@ def _render_lineage_graph(
         cv2.rectangle(canvas, (x - 5, y - 11), (x + 5, y + 11), (0, 165, 255), -1)
         cv2.putText(canvas, "?", (x - 5, y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (25, 25, 25), 2, cv2.LINE_AA)
 
-    cv2.putText(canvas, "green: auto relation | red: needs review | orange ?: unresolved ending", (22, height - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 210, 220), 1, cv2.LINE_AA)
+    cv2.putText(canvas, "colored line: saved mask interval | SEP/JOIN: structural event | green: auto | red: needs review", (22, height - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 210, 220), 1, cv2.LINE_AA)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = output_path.with_name(f"{output_path.stem}.tmp.png")
     if not cv2.imwrite(str(temporary_path), canvas):

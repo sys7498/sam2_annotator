@@ -73,8 +73,8 @@ python desktop_annotator.py --dataset /path/to/videos
 `annotations_ytvis.json`, `annotation_overlay.mp4` 기본 이름을 사용한다. 새 작업을 저장할 때 기존 결과 묶음은
 `history/<저장시각>/`로 통째로 이동하며, 그 안에서도 파일명은 기본 이름을 유지한다. 한 번 연 세션에서 `s`를 반복해도
 현재 기본 이름의 파일만 갱신한다.
-`lineage_graph.png`는 ID별 mask 구간과 separation/joining 화살표를 한눈에 보여 주며, `s`로
-중간 저장하거나 창을 닫고 `q`로 종료할 때마다 갱신된다. Windows 쪽 영상은 WSL에서 `/mnt/c/...` 경로로
+`lineage_graph.png`는 최종 저장된 mask가 하나 이상 있는 ID만 사용해 mask 구간과
+separation/joining 이벤트 노드·화살표를 보여 준다. `s`로 중간 저장하거나 창을 닫고 `q`로 종료할 때마다 갱신된다. Windows 쪽 영상은 WSL에서 `/mnt/c/...` 경로로
 지정하거나 `--pick`으로 선택할 수 있다.
 
 긴 clip에서 GPU memory를 제한해야 하면 `--state-window 96`을 사용한다. 이 값은 과거
