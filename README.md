@@ -74,8 +74,8 @@ python desktop_annotator.py --dataset /workspace/shared/aria_recording/split/joi
 `annotations_ytvis.json`, `annotation_overlay.mp4` 기본 이름을 사용한다. 새 작업을 저장할 때 기존 결과 묶음은
 `history/<저장시각>/`로 통째로 이동하며, 그 안에서도 파일명은 기본 이름을 유지한다. 한 번 연 세션에서 `s`를 반복해도
 현재 기본 이름의 파일만 갱신한다.
-`lineage_graph.png`는 최종 저장된 mask가 하나 이상 있는 ID만 사용해 mask 구간과
-separation/joining 이벤트 노드·화살표를 보여 준다. `s`로 중간 저장하거나 창을 닫고 `q`로 종료할 때마다 갱신된다. Windows 쪽 영상은 WSL에서 `/mnt/c/...` 경로로
+`lineage_graph.png`는 최종 저장된 mask가 하나 이상 있는 ID만 원형 노드로 그리고 predecessor→successor
+화살표를 연결한 lineage 그래프다. separation은 파랑, joining은 주황으로 구분한다. `s`로 중간 저장하거나 창을 닫고 `q`로 종료할 때마다 갱신된다. Windows 쪽 영상은 WSL에서 `/mnt/c/...` 경로로
 지정하거나 `--pick`으로 선택할 수 있다.
 
 긴 clip에서 GPU memory를 제한해야 하면 `--state-window 96`을 사용한다. 이 값은 과거
@@ -94,8 +94,8 @@ frame 상태를 정리하므로 과거 frame에서 수정하면 해당 frame까�
    SAM2 메모리와 이후 frame을 유지하므로 겹침/일시 가림 frame에서 쓴다. ID 입력은 모두 OpenCV 창 안에서 처리된다.
    한 ID를 종료하고 두 ID를 만들면 `1→2 separation`, 두 ID를 종료하고 한 ID를 만들면
    `2→1 joining` predecessor–successor 관계가 자동 생성된다. `l`로 관계를 터미널에
-   확인할 수 있고, `lineage_relations.json`과 `lineage_graph.png`에 저장된다. 그래프에서 초록은
-   자동 relation, 빨강은 재검수 필요 relation, 주황 `?`는 successor가 아직 없는 종료 ID다. 가림/추적 실패는 관계로 오인하지
+   확인할 수 있고, `lineage_relations.json`과 `lineage_graph.png`에 저장된다. 그래프에서 파랑 화살표는
+   separation, 주황 화살표와 주황 노드는 joining 결과, 빨강 테두리는 재검수 필요 relation이다. 가림/추적 실패는 관계로 오인하지
    않도록, ID를 명시적으로 종료한 경우에만 자동 생성한다.
 4. `Space` 또는 `.`은 한 frame 전진하며 SAM2가 현재 ID를 다음 frame으로 전파한다. `,`는
    이전 frame으로 이동한다. 과거 frame에서 mask를 수정한 뒤 `Space`를 누르면 그 지점 이후만

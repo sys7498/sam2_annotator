@@ -244,87 +244,86 @@ def _render_lineage_graph(
         temporary_path.replace(output_path)
         return
 
-    max_frame = max(
-        [max(indices) for indices in spans.values()]
-        + [int(relation.get("frame_idx", 0)) for relation in visible_relations]
-        + [int(item.frame_idx) for item in visible_pending]
-        + [max(0, int(processed_frames) - 1)]
-    )
-    left, right, top, row_height = 220, 70, 125, 54
-    width = 1800
-    height = max(300, top + max(1, len(track_ids)) * row_height + 115)
-    canvas = np.full((height, width, 3), (24, 28, 34), dtype=np.uint8)
-    plot_width = width - left - right
-
-    def x_at(frame_idx: int) -> int:
-        return int(left + round(plot_width * int(frame_idx) / max(1, max_frame)))
-
-    row_for_id = {track_id: top + index * row_height + 20 for index, track_id in enumerate(track_ids)}
-    cv2.putText(canvas, "Structural lineage graph", (22, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.9, (245, 245, 245), 2, cv2.LINE_AA)
-    review_count = sum(1 for relation in visible_relations if relation.get("status") != "auto")
-    summary = (
-        f"saved mask IDs: {len(track_ids)} | relations: {len(visible_relations)} | "
-        f"needs review: {review_count} | unresolved endings: {len(visible_pending)}"
-    )
-    cv2.putText(canvas, summary, (22, 68), cv2.FONT_HERSHEY_SIMPLEX, 0.55, (195, 210, 225), 1, cv2.LINE_AA)
-    cv2.putText(canvas, "frame", (left, 98), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (170, 185, 200), 1, cv2.LINE_AA)
-    for fraction in range(5):
-        frame = int(round(max_frame * fraction / 4))
-        x = x_at(frame)
-        cv2.line(canvas, (x, top - 8), (x, height - 55), (54, 61, 72), 1)
-        cv2.putText(canvas, str(frame), (x - 14, 98), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (170, 185, 200), 1, cv2.LINE_AA)
-
-    for track_id in track_ids:
-        y = row_for_id[track_id]
-        color = _track_color(track_id)
-        cv2.putText(canvas, f"ID {track_id}", (22, y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.58, color, 2, cv2.LINE_AA)
-        cv2.line(canvas, (left, y), (width - right, y), (42, 48, 56), 1)
-        frames = spans.get(track_id, [])
-        if not frames:
-            cv2.putText(canvas, "no saved mask", (left + 8, y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.48, (70, 155, 255), 1, cv2.LINE_AA)
-            continue
-        segment_start = frames[0]
-        previous = frames[0]
-        for frame in frames[1:] + [None]:
-            if frame is not None and int(frame) <= int(previous) + 1:
-                previous = int(frame)
-                continue
-            cv2.line(canvas, (x_at(segment_start), y), (x_at(previous), y), color, 6, cv2.LINE_AA)
-            cv2.circle(canvas, (x_at(segment_start), y), 4, color, -1, cv2.LINE_AA)
-            cv2.circle(canvas, (x_at(previous), y), 4, color, -1, cv2.LINE_AA)
-            if frame is not None:
-                segment_start = int(frame)
-                previous = int(frame)
-
-    for relation in visible_relations:
-        frame = int(relation.get("frame_idx", 0))
-        x = x_at(frame)
-        status = str(relation.get("status", "auto"))
-        relation_type = str(relation.get("type", "relation"))
-        color = (74, 215, 95) if status == "auto" else (55, 75, 255)
+    # Place each saved ID in a left-to-right lineage layer. This deliberately
+    # omits the dense per-frame timeline: the final PNG is a relationship graph
+    # meant for quick structural review.
+    relation_edges: List[tuple[int, int, str, str]] = []
+    incoming_ids: set[int] = set()
+    joining_children: set[int] = set()
+    review_ids: set[int] = set()
+    layer_for_id = {track_id: 0 for track_id in track_ids}
+    for relation in sorted(visible_relations, key=lambda item: int(item.get("frame_idx", 0))):
         parent_ids = [int(track_id) for track_id in relation.get("predecessor_ids", [])]
         child_ids = [int(track_id) for track_id in relation.get("successor_ids", [])]
-        event_y = int(round(sum(row_for_id[track_id] for track_id in parent_ids + child_ids) / len(parent_ids + child_ids)))
-        for parent_id in parent_ids:
-            parent_frame = min(frame, spans[parent_id][-1])
-            cv2.arrowedLine(canvas, (x_at(parent_frame), row_for_id[parent_id]), (x - 18, event_y), color, 2, cv2.LINE_AA, tipLength=0.16)
+        relation_type = str(relation.get("type", "relation"))
+        status = str(relation.get("status", "auto"))
+        child_layer = max(layer_for_id[parent_id] for parent_id in parent_ids) + 1
         for child_id in child_ids:
-            child_frame = max(frame, spans[child_id][0])
-            cv2.arrowedLine(canvas, (x + 18, event_y), (x_at(child_frame), row_for_id[child_id]), color, 2, cv2.LINE_AA, tipLength=0.16)
-        cv2.circle(canvas, (x, event_y), 19, (24, 28, 34), -1, cv2.LINE_AA)
-        cv2.circle(canvas, (x, event_y), 19, color, 2, cv2.LINE_AA)
-        label = "SEP" if relation_type == "separation" else "JOIN"
-        cv2.putText(canvas, label, (x - 17, event_y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.36, color, 1, cv2.LINE_AA)
+            layer_for_id[child_id] = max(layer_for_id[child_id], child_layer)
+            incoming_ids.add(child_id)
+            if relation_type == "joining":
+                joining_children.add(child_id)
+            if status != "auto":
+                review_ids.add(child_id)
+            for parent_id in parent_ids:
+                relation_edges.append((parent_id, child_id, relation_type, status))
 
-    for item in visible_pending:
-        y = row_for_id.get(int(item.track_id))
-        if y is None:
-            continue
-        x = x_at(int(item.frame_idx))
-        cv2.rectangle(canvas, (x - 5, y - 11), (x + 5, y + 11), (0, 165, 255), -1)
-        cv2.putText(canvas, "?", (x - 5, y + 5), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (25, 25, 25), 2, cv2.LINE_AA)
+    columns: dict[int, List[int]] = {}
+    for track_id in track_ids:
+        columns.setdefault(layer_for_id[track_id], []).append(track_id)
+    for node_ids in columns.values():
+        node_ids.sort(key=lambda track_id: (spans[track_id][0], track_id))
 
-    cv2.putText(canvas, "colored line: saved mask interval | SEP/JOIN: structural event | green: auto | red: needs review", (22, height - 25), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200, 210, 220), 1, cv2.LINE_AA)
+    max_layer = max(columns)
+    max_rows = max(len(node_ids) for node_ids in columns.values())
+    left, top, column_width, row_height, radius = 145, 125, 250, 112, 30
+    width = max(900, left + (max_layer + 1) * column_width + 125)
+    height = max(360, top + max_rows * row_height + 105)
+    canvas = np.full((height, width, 3), (250, 250, 250), dtype=np.uint8)
+    positions: dict[int, tuple[int, int]] = {}
+    for layer, node_ids in columns.items():
+        for row, track_id in enumerate(node_ids):
+            positions[track_id] = (left + layer * column_width, top + row * row_height)
+
+    text_color = (35, 35, 35)
+    blue = (235, 120, 35)
+    orange = (20, 130, 250)
+    review = (45, 45, 220)
+    cv2.putText(canvas, "Structural lineage graph", (30, 42), cv2.FONT_HERSHEY_SIMPLEX, 0.85, text_color, 2, cv2.LINE_AA)
+    review_count = sum(1 for relation in visible_relations if relation.get("status") != "auto")
+    cv2.putText(canvas, f"saved IDs: {len(track_ids)} | events: {len(visible_relations)} | needs review: {review_count}", (30, 72), cv2.FONT_HERSHEY_SIMPLEX, 0.52, (80, 80, 80), 1, cv2.LINE_AA)
+
+    def draw_curve(start: tuple[int, int], end: tuple[int, int], color: tuple[int, int, int]) -> None:
+        sx, sy = start
+        ex, ey = end
+        control_distance = max(40, (ex - sx) // 2)
+        points = []
+        for step in range(25):
+            t = step / 24.0
+            x = (1 - t) ** 3 * sx + 3 * (1 - t) ** 2 * t * (sx + control_distance) + 3 * (1 - t) * t ** 2 * (ex - control_distance) + t ** 3 * ex
+            y = (1 - t) ** 3 * sy + 3 * (1 - t) ** 2 * t * sy + 3 * (1 - t) * t ** 2 * ey + t ** 3 * ey
+            points.append((int(round(x)), int(round(y))))
+        cv2.polylines(canvas, [np.asarray(points, dtype=np.int32)], False, color, 2, cv2.LINE_AA)
+        cv2.arrowedLine(canvas, points[-3], points[-1], color, 2, cv2.LINE_AA, tipLength=0.45)
+
+    for parent_id, child_id, relation_type, status in relation_edges:
+        parent_x, parent_y = positions[parent_id]
+        child_x, child_y = positions[child_id]
+        edge_color = orange if relation_type == "joining" else blue
+        draw_curve((parent_x + radius, parent_y), (child_x - radius, child_y), edge_color)
+
+    for track_id in track_ids:
+        x, y = positions[track_id]
+        node_color = orange if track_id in joining_children else blue
+        cv2.circle(canvas, (x, y), radius, node_color, -1, cv2.LINE_AA)
+        cv2.circle(canvas, (x, y), radius, review if track_id in review_ids else (35, 35, 35), 2, cv2.LINE_AA)
+        label = str(track_id)
+        text_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
+        cv2.putText(canvas, label, (x - text_size[0] // 2, y + text_size[1] // 2), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1, cv2.LINE_AA)
+        if track_id not in incoming_ids:
+            cv2.arrowedLine(canvas, (28, y), (x - radius, y), blue, 2, cv2.LINE_AA, tipLength=0.18)
+
+    cv2.putText(canvas, "blue: separation / source ID | orange: joining result | red border: needs review", (30, height - 28), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (80, 80, 80), 1, cv2.LINE_AA)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     temporary_path = output_path.with_name(f"{output_path.stem}.tmp.png")
     if not cv2.imwrite(str(temporary_path), canvas):

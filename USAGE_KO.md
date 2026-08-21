@@ -189,9 +189,9 @@ bash scripts/extract_aria_recording_native_fps.sh --all --overwrite
 relation이 생성되지 않는다.
 
 `s`를 누르거나 창을 닫아 최종 저장하면 `lineage_graph.png`도 자동 생성/갱신된다. 이 파일은
-최종 저장된 mask가 하나 이상 있는 ID만 사용해 mask 프레임 구간과 구조 변화 이벤트 노드·화살표를
-한 장에 그린 검수용 그래프다.
-초록은 자동 relation, 빨강은 `needs_review`, 주황 `?`는 successor가 아직 없는 종료 ID를 뜻한다.
+최종 저장된 mask가 하나 이상 있는 ID를 원형 노드로 그리고 predecessor→successor 화살표를 연결한
+검수용 lineage 그래프다. separation은 파랑, joining은 주황으로 표시되며, 빨강 테두리는
+`needs_review` relation을 뜻한다.
 
 ## 6. 저장 결과
 
@@ -210,7 +210,7 @@ relation이 생성되지 않는다.
 - `annotations_ytvis.json`: track ID별 COCO-style uncompressed RLE mask, bbox, area
 - `interactive_session_meta.json`: 처리한 프레임, 영상 입력과 결과 파일 위치
 - `lineage_relations.json`: 자동 생성된 separation/joining predecessor–successor 관계 및 검수 상태
-- `lineage_graph.png`: 저장된 ID의 mask 구간, separation/joining 이벤트 노드와 화살표를 담은 빠른 검수용 그래프
+- `lineage_graph.png`: 저장된 ID 노드와 separation/joining predecessor–successor 화살표를 담은 빠른 검수용 그래프
 
 ## 7. WSL 문제 해결
 
