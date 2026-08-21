@@ -108,6 +108,26 @@ bash scripts/extract_aria_recording_native_fps.sh --all --overwrite
 원본 FPS 추출은 FFmpeg rate conversion을 하지 않아 source video frame 하나당 JPEG 하나를 만든다.
 5fps 결과와 분리된 `30fps_raw/`에 기록되며, 이미 완성된 시퀀스는 자동으로 건너뛴다.
 
+## Aria 30fps 프레임에서 10fps 시퀀스 만들기
+
+이미 만든 `30fps_raw/`의 JPEG에서 0, 3, 6… 번째 프레임을 선택해 10fps용 시퀀스를 만든다.
+출력 프레임은 `000000.jpg`부터 연속 번호로 다시 저장되며, 결과 위치는
+`10fps_sampled_sequences/<사람>/<작업>/rgb/`이다.
+
+```bash
+# 사람 한 명
+bash scripts/sample_aria_frames_10fps.sh jdh
+
+# 전체 사람
+bash scripts/sample_aria_frames_10fps.sh --all
+
+# 대상만 확인
+bash scripts/sample_aria_frames_10fps.sh --all --dry-run
+```
+
+JPEG는 원본과 하드링크로 연결된다. 어노테이션 작업은 프레임을 수정하지 않으므로 저장 공간을
+중복 사용하지 않으며, 원본을 삭제하거나 수정하면 안 된다.
+
 ## 2. 기본 작업 흐름
 
 1. 첫 프레임에서 `n`으로 새 object ID를 만든다.

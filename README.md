@@ -44,6 +44,14 @@ bash scripts/sample_aria_recording_5fps.sh <사람_폴더명>
 bash scripts/extract_aria_recording_native_fps.sh --all
 ```
 
+이미 추출된 `30fps_raw/`에서 10fps 시퀀스를 만들 때는 다음을 쓴다. 출력은
+`/workspace/shared/aria_recording/10fps_sampled_sequences/<사람>/<작업>/rgb/`이며,
+원본의 0, 3, 6… 번째 JPEG를 재번호화해 사용한다.
+
+```bash
+bash scripts/sample_aria_frames_10fps.sh --all
+```
+
 ## 실행
 
 ```bash
