@@ -15,7 +15,7 @@ bash scripts/setup_wsl_a6000.sh
 ```bash
 conda activate sam2-annotator
 
-# 기본: /workspace/shared/aria_recording/5fps_sampled_sequences 목록 열기
+# 기본: joining 시퀀스만 목록 열기
 python desktop_annotator.py
 
 # 파일 탐색기에서 하나 선택
@@ -26,11 +26,16 @@ python desktop_annotator.py --input /mnt/c/path/to/video.mp4
 
 # 기본 dataset 대신 다른 폴더의 영상 목록을 TODO/DONE 상태와 함께 표시
 python desktop_annotator.py --dataset /mnt/c/path/to/videos
+
+# separation 또는 전체 목록이 필요할 때만 명시
+python desktop_annotator.py --event sep
+python desktop_annotator.py --event all
 ```
 
 지원 입력은 MP4, AVI, MOV, MKV, WebM, MPEG 계열 영상과 이미지 또는 frame 이미지 폴더다.
-기본 dataset은 `/workspace/shared/aria_recording/5fps_sampled_sequences`로 고정되어 있다. 다른 데이터셋이나
-영상 하나를 열 때만 `--dataset` 또는 `--input`을 지정한다.
+기본 dataset은 `/workspace/shared/aria_recording/5fps_sampled_sequences`로 고정되어 있고 목록에는 `_join`
+시퀀스만 표시된다. 다른 데이터셋이나 영상 하나를 열 때만 `--dataset` 또는 `--input`을 지정한다.
+`--event sep` 또는 `--event all`로 separation 또는 전체 목록을 표시할 수 있다.
 annotation 저장 루트는 `/workspace/shared/aria_recording/5fps_sampled_masks`로 고정되어 있다. 다른 경로가
 필요한 경우에만 `--output-dir /path/to/annotations`로 덮어쓴다.
 `--dataset` 실행에서는 입력 데이터셋의 하위 폴더 구조를 유지하고, 작업명 끝의 `_sep`/`_join`을 읽어

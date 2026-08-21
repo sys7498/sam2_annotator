@@ -495,20 +495,23 @@ def _outputs_for(
     # Aria sequence names end in ``_sep`` or ``_join``. Keep the event type
     # at the top of the annotation tree for event-level review/export.
     # A direct --input uses its source path because its output key is ``rgb``.
-    event_type = None
-    for part in reversed((relative_input or input_path).parts):
-        normalized_name = Path(part).stem.lower()
-        if normalized_name.endswith("_sep"):
-            event_type = "sep"
-            break
-        if normalized_name.endswith("_join"):
-            event_type = "join"
-            break
+    event_type = _event_type_from_parts((relative_input or input_path).parts)
     if event_type:
         out_dir = output_root.joinpath(event_type, *key.parts)
     else:
         out_dir = output_root.joinpath(*key.parts)
     return out_dir, "annotations_ytvis.json", "interactive_session_meta.json"
+
+
+def _event_type_from_parts(parts: Iterable[str]) -> str | None:
+    """Return the Aria event suffix nearest to the sequence leaf, if any."""
+    for part in reversed(tuple(parts)):
+        normalized_name = Path(part).stem.lower()
+        if normalized_name.endswith("_sep"):
+            return "sep"
+        if normalized_name.endswith("_join"):
+            return "join"
+    return None
 
 
 def _make_args(
@@ -548,7 +551,11 @@ def _make_args(
     )
 
 
-def _discover_dataset_inputs(gui, base_dir: Path) -> List[tuple[Path, Path]]:
+def _discover_dataset_inputs(
+    gui,
+    base_dir: Path,
+    event_filter: str = "join",
+) -> List[tuple[Path, Path]]:
     """Find videos recursively and image-frame sequences without name collisions.
 
     For example, ``raw/jdh/jdh_cups_join/rgb.mp4`` is returned with its
@@ -563,14 +570,19 @@ def _discover_dataset_inputs(gui, base_dir: Path) -> List[tuple[Path, Path]]:
         visible_files = sorted(name for name in file_names if not name.startswith("."))
         for name in visible_files:
             path = root / name
-            if path.suffix.lower() in VIDEO_EXTENSIONS:
-                found.append((path, path.relative_to(base_dir)))
+            relative_path = path.relative_to(base_dir)
+            if path.suffix.lower() in VIDEO_EXTENSIONS and (
+                event_filter == "all" or _event_type_from_parts(relative_path.parts) == event_filter
+            ):
+                found.append((path, relative_path))
 
         # A directory containing image files is one frame sequence. Do not
         # also offer every individual image as a separate dataset item.
         image_files = [name for name in visible_files if gui._is_image_file(name)]
         if image_files:
-            found.append((root, root.relative_to(base_dir)))
+            relative_path = root.relative_to(base_dir)
+            if event_filter == "all" or _event_type_from_parts(relative_path.parts) == event_filter:
+                found.append((root, relative_path))
             dir_names[:] = []
 
     return sorted(found, key=lambda item: str(item[1]).lower())
@@ -628,6 +640,12 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Folder searched recursively for videos/frame-directories; opens a TODO/DONE picker",
     )
+    parser.add_argument(
+        "--event",
+        choices=("join", "sep", "all"),
+        default="join",
+        help="Event type shown in the dataset picker",
+    )
     parser.add_argument("--pick", action="store_true", help="Open the operating system file picker")
     parser.add_argument(
         "--output-dir",
@@ -663,7 +681,7 @@ def main() -> None:
             options.input = Path(picked)
     if options.input is None and options.dataset is None:
         options.dataset = DEFAULT_DATASET_ROOT
-        print(f"[Launcher] Default dataset: {options.dataset}")
+        print(f"[Launcher] Default dataset: {options.dataset} (event: {options.event})")
 
     gui = _load_gui_module()
     gui.LineageInteractiveSam2Gui = _make_lineage_gui_class(gui)
@@ -673,7 +691,7 @@ def main() -> None:
             raise SystemExit(f"Dataset folder not found: {base}")
         args_list = [
             _make_args(gui, input_path, options, relative_input)
-            for input_path, relative_input in _discover_dataset_inputs(gui, base)
+            for input_path, relative_input in _discover_dataset_inputs(gui, base, options.event)
         ]
         _run_picker(gui, args_list, Path(options.output_dir))
         return
