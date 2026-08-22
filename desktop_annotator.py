@@ -836,7 +836,14 @@ def _discover_dataset_inputs(gui, base_dir: Path) -> List[tuple[Path, Path]]:
     found: List[tuple[Path, Path]] = []
     for root_text, dir_names, file_names in os.walk(base_dir):
         root = Path(root_text)
-        dir_names[:] = sorted(name for name in dir_names if not name.startswith("."))
+        # Result/clip archives can contain an older ``rgb/`` directory. They
+        # are recoverable history, not annotation targets, so never let them
+        # appear as an extra sequence in the picker.
+        dir_names[:] = sorted(
+            name
+            for name in dir_names
+            if not name.startswith(".") and name.lower() != "history"
+        )
         visible_files = sorted(name for name in file_names if not name.startswith("."))
         image_files = [name for name in visible_files if gui._is_image_file(name)]
         if root.name.lower() == "rgb" and image_files:
